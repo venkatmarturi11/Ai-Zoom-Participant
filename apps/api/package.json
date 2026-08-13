@@ -1,0 +1,24 @@
+{
+  "name": "@zoom-assistant/api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "fastify": "^4.28.0",
+    "@fastify/cors": "^9.0.1",
+    "@zoom-assistant/shared": "*",
+    "@zoom-assistant/database": "*",
+    "@zoom-assistant/crypto": "*",
+    "@zoom-assistant/zoom": "*"
+  },
+  "devDependencies": {
+    "tsx": "^4.16.0"
+  }
+}

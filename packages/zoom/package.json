@@ -1,0 +1,16 @@
+{
+  "name": "@zoom-assistant/zoom",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@zoom-assistant/shared": "*",
+    "@zoom-assistant/database": "*",
+    "@zoom-assistant/crypto": "*"
+  }
+}

@@ -1,0 +1,102 @@
+import type { Bot } from 'grammy';
+import type { BotContext } from '../bot.js';
+import { startCommand } from './start.js';
+import { helpCommand } from './help.js';
+import { connectZoomCommand } from './connect-zoom.js';
+import { accountCommand } from './account.js';
+import { disconnectZoomCommand, handleDisconnectConfirm } from './disconnect-zoom.js';
+import { joinCommand, handleMeetingLinkInput, handlePasscodeInput } from './join.js';
+import { scheduleCommand, handleScheduleTimeInput } from './schedule.js';
+import { meetingsCommand } from './meetings.js';
+import { statusCommand } from './status.js';
+import { stopCommand, handleStopConfirm } from './stop.js';
+import { settingsCommand } from './settings.js';
+import { userRepo } from '@zoom-assistant/database';
+
+export function registerCommands(bot: Bot<BotContext>): void {
+  // Middleware to ensure user record exists on any command interaction
+  bot.use(async (ctx, next) => {
+    if (ctx.from) {
+      await userRepo.upsert(BigInt(ctx.from.id), ctx.from.username);
+    }
+    await next();
+  });
+
+  // Register command handlers
+  bot.command('start', startCommand);
+  bot.command('help', helpCommand);
+  bot.command('connect_zoom', connectZoomCommand);
+  bot.command('account', accountCommand);
+  bot.command('disconnect_zoom', disconnectZoomCommand);
+  bot.command('join', joinCommand);
+  bot.command('schedule', scheduleCommand);
+  bot.command('meetings', meetingsCommand);
+  bot.command('status', statusCommand);
+  bot.command('stop', stopCommand);
+  bot.command('settings', settingsCommand);
+
+  // Handle multi-step conversation inputs
+  bot.on('message:text', async (ctx, next) => {
+    // If command, skip to next middleware (handled by bot.command above)
+    if (ctx.message.text.startsWith('/')) {
+      return next();
+    }
+
+    const { step } = ctx.session;
+
+    if (step === 'awaiting_meeting_link') {
+      await handleMeetingLinkInput(ctx);
+      return;
+    }
+
+    if (step === 'awaiting_passcode') {
+      await handlePasscodeInput(ctx);
+      return;
+    }
+
+    if (step === 'awaiting_schedule_time') {
+      await handleScheduleTimeInput(ctx);
+      return;
+    }
+
+    await next();
+  });
+
+  // Handle callback queries
+  bot.on('callback_query:data', async (ctx, next) => {
+    const data = ctx.callbackQuery.data;
+
+    if (data === 'disconnect_confirm') {
+      await handleDisconnectConfirm(ctx);
+      return;
+    }
+
+    if (data === 'disconnect_cancel') {
+      await ctx.editMessageText('Cancelled disconnection.');
+      return;
+    }
+
+    if (data.startsWith('stop_confirm:')) {
+      const meetingId = data.replace('stop_confirm:', '');
+      await handleStopConfirm(ctx, meetingId);
+      return;
+    }
+
+    if (data.startsWith('stop_cancel:')) {
+      await ctx.editMessageText('Cancelled stop request.');
+      return;
+    }
+
+    if (data === 'reconnect_zoom') {
+      await connectZoomCommand(ctx);
+      return;
+    }
+
+    if (data === 'disconnect_zoom') {
+      await disconnectZoomCommand(ctx);
+      return;
+    }
+
+    await next();
+  });
+}

@@ -1,0 +1,174 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// Users — Telegram identity
+// ============================================================
+model User {
+  id               String       @id @default(cuid())
+  telegramUserId   BigInt       @unique @map("telegram_user_id")
+  telegramUsername  String?      @map("telegram_username")
+  status           UserStatus   @default(ACTIVE)
+  createdAt        DateTime     @default(now()) @map("created_at")
+  updatedAt        DateTime     @updatedAt @map("updated_at")
+
+  zoomAccounts     ZoomAccount[]
+  meetings         Meeting[]
+  auditLogs        AuditLog[]
+
+  @@map("users")
+}
+
+// ============================================================
+// Zoom accounts — OAuth tokens (encrypted)
+// ============================================================
+model ZoomAccount {
+  id                     String        @id @default(cuid())
+  userId                 String        @map("user_id")
+  zoomUserId             String        @map("zoom_user_id")
+  zoomEmail              String        @map("zoom_email")
+  accessTokenEncrypted   String        @map("access_token_encrypted")
+  refreshTokenEncrypted  String        @map("refresh_token_encrypted")
+  tokenExpiresAt         DateTime      @map("token_expires_at")
+  scopes                 String?
+  status                 AccountStatus @default(ACTIVE)
+  createdAt              DateTime      @default(now()) @map("created_at")
+  updatedAt              DateTime      @updatedAt @map("updated_at")
+
+  user                   User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, zoomUserId])
+  @@map("zoom_accounts")
+}
+
+// ============================================================
+// Meetings — join requests (active and historical)
+// ============================================================
+model Meeting {
+  id                     String        @id @default(cuid())
+  userId                 String        @map("user_id")
+  zoomMeetingId          String        @map("zoom_meeting_id")
+  meetingUrl             String        @map("meeting_url")
+  passcodeEncrypted      String?       @map("passcode_encrypted")
+  topic                  String?
+  displayName            String        @default("Meeting Assistant") @map("display_name")
+  scheduledAt            DateTime?     @map("scheduled_at")
+  timezone               String        @default("Asia/Kolkata")
+  actualStart            DateTime?     @map("actual_start")
+  actualEnd              DateTime?     @map("actual_end")
+  status                 MeetingStatus @default(CREATED)
+  createdAt              DateTime      @default(now()) @map("created_at")
+  updatedAt              DateTime      @updatedAt @map("updated_at")
+
+  user                   User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  botSessions            BotSession[]
+
+  @@index([userId, status])
+  @@index([status])
+  @@map("meetings")
+}
+
+// ============================================================
+// Bot sessions — individual worker sessions per meeting
+// ============================================================
+model BotSession {
+  id                String        @id @default(cuid())
+  meetingId         String        @map("meeting_id")
+  workerId          String?       @map("worker_id")
+  authorizationType AuthType      @default(OBF)
+  sdkVersion        String?       @map("sdk_version")
+  status            SessionStatus @default(CREATED)
+  startedAt         DateTime      @default(now()) @map("started_at")
+  connectedAt       DateTime?     @map("connected_at")
+  endedAt           DateTime?     @map("ended_at")
+  exitReason        String?       @map("exit_reason")
+  errorCode         String?       @map("error_code")
+
+  meeting           Meeting       @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  @@index([meetingId])
+  @@map("bot_sessions")
+}
+
+// ============================================================
+// OAuth states — CSRF protection for OAuth flow
+// ============================================================
+model OAuthState {
+  state            String   @id
+  telegramUserId   BigInt   @map("telegram_user_id")
+  expiresAt        DateTime @map("expires_at")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  @@map("oauth_states")
+}
+
+// ============================================================
+// Audit logs — security-relevant actions
+// ============================================================
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?  @map("user_id")
+  action    String
+  metadata  Json?
+  ipAddress String?  @map("ip_address")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ============================================================
+// Enums
+// ============================================================
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum AccountStatus {
+  ACTIVE
+  DISCONNECTED
+  REVOKED
+  REFRESH_FAILED
+}
+
+enum MeetingStatus {
+  CREATED
+  SCHEDULED
+  STARTING
+  AUTHENTICATING
+  SDK_INITIALIZING
+  JOINING
+  WAITING_ROOM
+  CONNECTED
+  RECONNECTING
+  STOPPING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum SessionStatus {
+  CREATED
+  STARTING
+  CONNECTED
+  RECONNECTING
+  ENDING
+  COMPLETED
+  FAILED
+}
+
+enum AuthType {
+  ZAK
+  OBF
+}
