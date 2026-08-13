@@ -2,10 +2,10 @@
   "name": "@zoom-assistant/database",
   "version": "1.0.0",
   "private": true,
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "scripts": {
-    "build": "prisma generate && tsc",
+    "build": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\" && prisma generate && tsc",
     "generate": "prisma generate",
     "migrate": "prisma migrate dev",
     "migrate:prod": "prisma migrate deploy",
