@@ -1,5 +1,5 @@
 {
-  "name": "@zoom-assistant/scheduler",
+  "name": "@zoom-assistant/worker",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -13,6 +13,7 @@
   "dependencies": {
     "@zoom-assistant/shared": "*",
     "@zoom-assistant/database": "*",
+    "@zoom-assistant/zoom": "*",
     "@zoom-assistant/queue": "*"
   },
   "devDependencies": {

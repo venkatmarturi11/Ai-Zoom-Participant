@@ -110,7 +110,6 @@ function mapStateToEvent(state: WorkerState): (typeof MEETING_EVENTS)[keyof type
       return MEETING_EVENTS.MEETING_STARTING;
     case 'AUTHENTICATING':
       return MEETING_EVENTS.MEETING_AUTHENTICATING;
-    case 'JOINING':
     case 'CONNECTING':
       return MEETING_EVENTS.MEETING_JOINING;
     case 'WAITING_ROOM':

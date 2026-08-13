@@ -1,0 +1,50 @@
+services:
+  # 1. Fastify API & OAuth Web Service
+  - type: web
+    name: Ai-Zoom-Participant
+    env: node
+    region: singapore
+    plan: free
+    buildCommand: npm install && npm run db:generate && npm run build
+    startCommand: node apps/api/dist/index.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: API_PORT
+        value: 10000
+
+  # 2. Telegram Bot Polling Daemon
+  - type: worker
+    name: Ai-Zoom-Participant-Bot
+    env: node
+    region: singapore
+    plan: free
+    buildCommand: npm install && npm run db:generate && npm run build
+    startCommand: node apps/telegram-bot/dist/index.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+  # 3. Zoom Meeting Worker Daemon
+  - type: worker
+    name: Ai-Zoom-Participant-Worker
+    env: node
+    region: singapore
+    plan: free
+    buildCommand: npm install && npm run db:generate && npm run build
+    startCommand: node apps/worker/dist/index.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+  # 4. BullMQ Scheduler & Server Recovery Daemon
+  - type: worker
+    name: Ai-Zoom-Participant-Scheduler
+    env: node
+    region: singapore
+    plan: free
+    buildCommand: npm install && npm run db:generate && npm run build
+    startCommand: node apps/scheduler/dist/index.js
+    envVars:
+      - key: NODE_ENV
+        value: production
