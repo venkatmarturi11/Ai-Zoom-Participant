@@ -33,7 +33,7 @@ export async function authMiddleware(ctx: BotContext, next: NextFunction): Promi
 
   const allowedIds = authorizedIds
     .split(/[\s,]+/)
-    .map((id) => id.replace(/['"]/g, '').trim())
+    .map((id) => id.replace(/[^\d*]/g, '').trim())
     .filter(Boolean);
 
   if (!allowedIds.includes('*') && !allowedIds.includes(String(userId))) {
