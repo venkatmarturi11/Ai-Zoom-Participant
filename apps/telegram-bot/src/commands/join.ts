@@ -107,11 +107,14 @@ export async function handleMeetingLinkInput(ctx: BotContext): Promise<void> {
 
   // Delegate to MeetingService for meeting creation and BullMQ enqueueing
   try {
+    const userDisplayName = [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(' ') || ctx.from?.username || undefined;
+
     const result = await meetingService.createAndQueueMeeting({
       telegramUserId,
       meetingUrl: meeting.originalUrl,
       meetingId: meeting.meetingId,
       passcode: meeting.passcode ?? undefined,
+      displayName: userDisplayName,
     });
 
     log.info(
@@ -165,11 +168,14 @@ export async function handlePasscodeInput(ctx: BotContext): Promise<void> {
   ctx.session.pendingMeetingUrl = undefined;
 
   try {
+    const userDisplayName = [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(' ') || ctx.from?.username || undefined;
+
     const result = await meetingService.createAndQueueMeeting({
       telegramUserId,
       meetingUrl,
       meetingId,
       passcode: text,
+      displayName: userDisplayName,
     });
 
     await ctx.reply(

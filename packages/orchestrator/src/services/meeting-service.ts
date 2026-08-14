@@ -66,13 +66,17 @@ export class MeetingService {
     const encryptionKey = process.env['ENCRYPTION_KEY'] ?? '';
     const passcodeEncrypted = params.passcode ? encryptToken(params.passcode, encryptionKey) : undefined;
 
+    // Resolve display name: passed name -> telegram username -> zoom email username -> DEFAULT_DISPLAY_NAME -> Meeting Assistant
+    const defaultDisplayName = user.telegramUsername ?? zoomAccount.zoomEmail.split('@')[0] ?? process.env['DEFAULT_DISPLAY_NAME'] ?? 'Meeting Assistant';
+    const displayName = params.displayName ?? defaultDisplayName;
+
     // Create DB meeting record
     const meeting = await meetingRepo.create({
       userId: user.id,
       zoomMeetingId: params.meetingId,
       meetingUrl: params.meetingUrl,
       passcodeEncrypted,
-      displayName: params.displayName ?? process.env['DEFAULT_DISPLAY_NAME'] ?? 'Meeting Assistant',
+      displayName,
       status: 'CREATED',
     });
 
@@ -99,7 +103,7 @@ export class MeetingService {
    * Create and queue a scheduled meeting join job.
    */
   public async scheduleMeeting(params: ScheduleMeetingParams): Promise<ServiceMeetingResult> {
-    const { user } = await this.validateUserAndAccount(params.telegramUserId);
+    const { user, zoomAccount } = await this.validateUserAndAccount(params.telegramUserId);
 
     const delayMs = params.scheduledAt.getTime() - Date.now();
     if (delayMs <= 0) {
@@ -121,12 +125,15 @@ export class MeetingService {
     const encryptionKey = process.env['ENCRYPTION_KEY'] ?? '';
     const passcodeEncrypted = params.passcode ? encryptToken(params.passcode, encryptionKey) : undefined;
 
+    const defaultDisplayName = user.telegramUsername ?? zoomAccount.zoomEmail.split('@')[0] ?? process.env['DEFAULT_DISPLAY_NAME'] ?? 'Meeting Assistant';
+    const displayName = params.displayName ?? defaultDisplayName;
+
     const meeting = await meetingRepo.create({
       userId: user.id,
       zoomMeetingId: params.meetingId,
       meetingUrl: params.meetingUrl,
       passcodeEncrypted,
-      displayName: params.displayName ?? process.env['DEFAULT_DISPLAY_NAME'] ?? 'Meeting Assistant',
+      displayName,
       scheduledAt: params.scheduledAt,
       timezone: params.timezone ?? process.env['DEFAULT_TIMEZONE'] ?? 'Asia/Kolkata',
       status: 'SCHEDULED',
