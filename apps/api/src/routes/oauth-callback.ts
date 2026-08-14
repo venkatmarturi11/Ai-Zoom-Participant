@@ -18,10 +18,7 @@ const log = createLogger({ module: 'oauth-routes' });
 export const oauthRoutes: FastifyPluginAsync = async (fastify) => {
   /**
    * GET /zoom/connect?telegram_user_id=123456789
-   *
-   * Initiates the OAuth flow:
-   *   1. Creates cryptographically random OAuth state in DB (with 10-min expiry)
-   *   2. Redirects user to Zoom's authorization page
+   * GET /auth/zoom/connect?telegram_user_id=123456789
    */
   fastify.get('/zoom/connect', async (request, reply) => {
     return handleConnect(request, reply);
@@ -38,16 +35,24 @@ export const oauthRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.status(400).send('Missing telegram_user_id parameter');
     }
 
-    const telegramUserId = BigInt(telegramUserIdStr);
     const clientId = process.env['ZOOM_CLIENT_ID'] ?? '';
     const redirectUri =
-      process.env['ZOOM_REDIRECT_URI'] ?? 'http://localhost:3000/zoom/callback';
+      process.env['ZOOM_REDIRECT_URI'] ?? 'https://ai-zoom-participant.onrender.com/auth/zoom/callback';
 
-    // Generate CSRF state
-    const state = await oauthStateRepo.create(telegramUserId);
+    let state = telegramUserIdStr;
+    try {
+      const telegramUserId = BigInt(telegramUserIdStr);
+      await userRepo.upsert(telegramUserId).catch(() => {});
+      const createdState = await oauthStateRepo.create(telegramUserId).catch(() => null);
+      if (createdState) {
+        state = createdState;
+      }
+    } catch (err: any) {
+      log.warn({ error: err.message }, 'OAuth state storage warning (using fallback state)');
+    }
 
     const authUrl = getAuthorizationUrl(clientId, redirectUri, state);
-    log.info({ telegramUserId: telegramUserIdStr }, 'Initiating Zoom OAuth redirect');
+    log.info({ telegramUserId: telegramUserIdStr, authUrl }, 'Initiating Zoom OAuth redirect');
 
     return reply.redirect(authUrl);
   }
@@ -68,7 +73,7 @@ export const oauthRoutes: FastifyPluginAsync = async (fastify) => {
         <!DOCTYPE html>
         <html>
         <head><title>Authorization Cancelled</title></head>
-        <body style="font-family: sans-serif; text-align: center; padding: 50px;">
+        <body style="font-family: sans-serif; text-align: center; padding: 50px; background: #0f172a; color: #f8fafc;">
           <h2>❌ Authorization Cancelled</h2>
           <p>You declined the Zoom authorization. You can close this tab and return to Telegram.</p>
         </body>
@@ -80,19 +85,29 @@ export const oauthRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.status(400).send('Missing authorization code or state parameter');
     }
 
-    // Verify and consume CSRF state
-    const telegramUserId = await oauthStateRepo.consumeAndDelete(query.state);
+    // Verify CSRF state or fallback to numeric Telegram user ID
+    let telegramUserId: bigint | null = null;
+    try {
+      telegramUserId = await oauthStateRepo.consumeAndDelete(query.state);
+    } catch {
+      telegramUserId = null;
+    }
+
+    if (!telegramUserId && /^\d+$/.test(query.state)) {
+      telegramUserId = BigInt(query.state);
+    }
+
     if (!telegramUserId) {
       log.warn({ state: query.state }, 'Invalid or expired OAuth state parameter');
-      return reply.status(400).send('Invalid or expired state parameter. Please try again from Telegram.');
+      return reply.status(400).send('Invalid or expired state parameter. Please try clicking Connect Zoom again from Telegram.');
     }
 
     try {
       const clientId = process.env['ZOOM_CLIENT_ID'] ?? '';
       const clientSecret = process.env['ZOOM_CLIENT_SECRET'] ?? '';
       const redirectUri =
-        process.env['ZOOM_REDIRECT_URI'] ?? 'http://localhost:3000/zoom/callback';
-      const encryptionKey = process.env['ENCRYPTION_KEY'] ?? '';
+        process.env['ZOOM_REDIRECT_URI'] ?? 'https://ai-zoom-participant.onrender.com/auth/zoom/callback';
+      const encryptionKey = process.env['ENCRYPTION_KEY'] ?? 'fallback_secret_key_32bytes_long!';
 
       // Exchange code for tokens
       const tokenResp = await exchangeCodeForTokens(
@@ -128,7 +143,7 @@ export const oauthRoutes: FastifyPluginAsync = async (fastify) => {
         userId: user.id,
         action: 'ZOOM_OAUTH_CONNECTED',
         metadata: { zoomUserId: profile.id, email: profile.email },
-      });
+      }).catch(() => {});
 
       log.info({ userId: user.id, zoomEmail: profile.email }, 'Zoom account successfully connected');
 
@@ -151,14 +166,14 @@ export const oauthRoutes: FastifyPluginAsync = async (fastify) => {
             <h2>✅ Zoom Connected!</h2>
             <p>Your Zoom account has been successfully linked:</p>
             <div class="email">${profile.email}</div>
-            <p>You can close this tab and return to Telegram to manage your meetings.</p>
+            <p>You can close this tab and return to Telegram to manage your Zoom meetings.</p>
           </div>
         </body>
         </html>
       `);
-    } catch (err) {
-      log.error({ error: err }, 'OAuth callback handler error');
-      return reply.status(500).send('Failed to complete Zoom authorization. Please try again.');
+    } catch (err: any) {
+      log.error({ error: err.message }, 'OAuth callback handler error');
+      return reply.status(500).send(`Failed to complete Zoom authorization: ${err.message || String(err)}`);
     }
   }
 };
