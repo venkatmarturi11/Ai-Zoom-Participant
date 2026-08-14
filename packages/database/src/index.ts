@@ -1,4 +1,4 @@
-export { getDb, disconnectDb } from './client.js';
+export { getDb, disconnectDb, initDatabaseSchema } from './client.js';
 export { userRepo } from './repositories/user.repo.js';
 export { zoomAccountRepo } from './repositories/zoom-account.repo.js';
 export { meetingRepo } from './repositories/meeting.repo.js';

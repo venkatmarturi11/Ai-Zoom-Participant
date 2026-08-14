@@ -1,5 +1,6 @@
 import { createServer } from './server.js';
 import { createBot, setupBotCommands, notificationService } from '@zoom-assistant/telegram-bot';
+import { initDatabaseSchema } from '@zoom-assistant/database';
 import { createLogger } from '@zoom-assistant/shared';
 
 // Polyfill BigInt serialization to prevent JSON.stringify crashes across Fastify & Pino loggers
@@ -51,6 +52,15 @@ async function main() {
 
   const port = Number(process.env['PORT'] ?? process.env['API_PORT'] ?? 3000);
   const host = process.env['API_HOST'] ?? '0.0.0.0';
+
+  // Initialize PostgreSQL database schema / tables if not present
+  try {
+    log.info('Ensuring PostgreSQL database tables and enums are initialized...');
+    await initDatabaseSchema();
+    log.info('✅ PostgreSQL database schema check complete');
+  } catch (err: any) {
+    log.warn({ error: err?.message }, 'Database schema initialization warning (proceeding)');
+  }
 
   try {
     await server.listen({ port, host });
