@@ -1,50 +1,92 @@
+databases:
+  - name: zoom-assistant-db
+    databaseName: zoom_assistant
+    plan: free
+    postgresMajorVersion: "16"
+
 services:
+  # 0. Redis / BullMQ backing store
+  - type: keyvalue
+    name: zoom-assistant-redis
+    plan: free
+    ipAllowList: []
+    maxmemoryPolicy: noeviction
+
   # 1. Fastify API & OAuth Web Service
   - type: web
     name: Ai-Zoom-Participant
-    env: node
+    runtime: node
     region: singapore
     plan: free
     buildCommand: npm install && npm run db:generate && npm run build
     startCommand: node apps/api/dist/index.js
-    envVars:
+    envVars: &sharedEnv
       - key: NODE_ENV
         value: production
       - key: API_PORT
         value: 10000
+      - key: API_HOST
+        value: 0.0.0.0
+      - key: DATABASE_URL
+        fromDatabase:
+          name: zoom-assistant-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: zoom-assistant-redis
+          property: connectionString
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_WEBHOOK_URL
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
+      - key: AUTHORIZED_TELEGRAM_IDS
+        sync: false
+      - key: ZOOM_CLIENT_ID
+        sync: false
+      - key: ZOOM_CLIENT_SECRET
+        sync: false
+      - key: ZOOM_REDIRECT_URI
+        sync: false
+      - key: ZOOM_SDK_KEY
+        sync: false
+      - key: ZOOM_SDK_SECRET
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: DEFAULT_DISPLAY_NAME
+        value: Meeting Assistant
+      - key: DEFAULT_TIMEZONE
+        value: Asia/Kolkata
 
-  # 2. Telegram Bot Polling Daemon
+  # 2. Telegram Bot Polling/Webhook Daemon
   - type: worker
     name: Ai-Zoom-Participant-Bot
-    env: node
+    runtime: node
     region: singapore
-    plan: free
+    plan: starter
     buildCommand: npm install && npm run db:generate && npm run build
     startCommand: node apps/telegram-bot/dist/index.js
-    envVars:
-      - key: NODE_ENV
-        value: production
+    envVars: *sharedEnv
 
   # 3. Zoom Meeting Worker Daemon
   - type: worker
     name: Ai-Zoom-Participant-Worker
-    env: node
+    runtime: node
     region: singapore
-    plan: free
+    plan: starter
     buildCommand: npm install && npm run db:generate && npm run build
     startCommand: node apps/worker/dist/index.js
-    envVars:
-      - key: NODE_ENV
-        value: production
+    envVars: *sharedEnv
 
   # 4. BullMQ Scheduler & Server Recovery Daemon
   - type: worker
     name: Ai-Zoom-Participant-Scheduler
-    env: node
+    runtime: node
     region: singapore
-    plan: free
+    plan: starter
     buildCommand: npm install && npm run db:generate && npm run build
     startCommand: node apps/scheduler/dist/index.js
-    envVars:
-      - key: NODE_ENV
-        value: production
+    envVars: *sharedEnv
