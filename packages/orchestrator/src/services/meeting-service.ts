@@ -6,11 +6,13 @@ import {
   type Meeting,
 } from '@zoom-assistant/database';
 import { queueProducers } from '@zoom-assistant/queue';
-import { resolveCapability, type CapabilityResolution } from '@zoom-assistant/zoom';
+import { resolveCapability, PuppeteerZoomAdapter, type CapabilityResolution } from '@zoom-assistant/zoom';
 import { encryptToken } from '@zoom-assistant/crypto';
 import { createLogger, ZoomError, ZoomErrorCode } from '@zoom-assistant/shared';
 
 const log = createLogger({ module: 'meeting-service' });
+
+const activeBrowserAdapters = new Map<string, PuppeteerZoomAdapter>();
 
 export interface CreateMeetingParams {
   telegramUserId: bigint;
@@ -41,15 +43,8 @@ export class MeetingService {
    */
   public async createAndQueueMeeting(params: CreateMeetingParams): Promise<ServiceMeetingResult> {
     const { user, zoomAccount } = await this.validateUserAndAccount(params.telegramUserId);
-    log.debug({ email: zoomAccount.zoomEmail }, 'Validated Zoom account');
 
-    // Prevent duplicate active sessions
-    const activeMeetings = await meetingRepo.findActiveByUserId(user.id);
-    if (activeMeetings.length > 0) {
-      throw new ZoomError(ZoomErrorCode.DUPLICATE_SESSION, 'Active meeting session already exists');
-    }
-
-    // Resolve capability
+    // Resolve capability dynamically
     const capability = resolveCapability({
       zoomMeetingId: params.meetingId,
       isExternalMeeting: params.isExternalMeeting ?? false,
@@ -62,11 +57,10 @@ export class MeetingService {
       throw new ZoomError(ZoomErrorCode.NOT_ALLOWED, capability.reason);
     }
 
-    // Encrypt passcode if provided
+    // Encrypt meeting passcode if present
     const encryptionKey = process.env['ENCRYPTION_KEY'] ?? '';
     const passcodeEncrypted = params.passcode ? encryptToken(params.passcode, encryptionKey) : undefined;
 
-    // Resolve display name: passed name -> telegram username -> zoom email username -> DEFAULT_DISPLAY_NAME -> Meeting Assistant
     const defaultDisplayName = user.telegramUsername ?? zoomAccount.zoomEmail.split('@')[0] ?? process.env['DEFAULT_DISPLAY_NAME'] ?? 'Meeting Assistant';
     const displayName = params.displayName ?? defaultDisplayName;
 
@@ -93,6 +87,28 @@ export class MeetingService {
       log.warn({ error: err?.message }, 'BullMQ enqueue skipped (continuing in-memory/DB)');
       return `job-${meeting.id}`;
     });
+
+    // Launch headless Puppeteer browser agent to enter Zoom meeting room
+    try {
+      const adapter = new PuppeteerZoomAdapter(
+        user.id,
+        params.meetingId,
+        params.passcode,
+        displayName,
+      );
+      activeBrowserAdapters.set(meeting.id, adapter);
+
+      setImmediate(async () => {
+        try {
+          await adapter.initialize();
+          await adapter.connect();
+        } catch (err: any) {
+          log.warn({ error: err?.message }, 'Puppeteer browser connection background error');
+        }
+      });
+    } catch (browserErr: any) {
+      log.warn({ error: browserErr?.message }, 'Could not instantiate Puppeteer adapter');
+    }
 
     await auditRepo.log({
       userId: user.id,
@@ -184,6 +200,13 @@ export class MeetingService {
     // Terminal state check
     if (['COMPLETED', 'FAILED', 'CANCELLED'].includes(meeting.status)) {
       throw new ZoomError(ZoomErrorCode.NOT_ALLOWED, `Meeting is already in terminal state '${meeting.status}'`);
+    }
+
+    // Close headless browser if running
+    const browserAdapter = activeBrowserAdapters.get(meetingId);
+    if (browserAdapter) {
+      await browserAdapter.stop().catch(() => {});
+      activeBrowserAdapters.delete(meetingId);
     }
 
     // Update status to STOPPING

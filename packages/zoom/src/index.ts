@@ -29,9 +29,8 @@ export {
   ZakParticipantAdapter,
   ObfParticipantAdapter,
   RtmsMediaAdapter,
+  PuppeteerZoomAdapter,
   type MeetingAdapter,
   type AdapterStatus,
   type AdapterFactoryParams,
 } from './adapters/index.js';
-
-

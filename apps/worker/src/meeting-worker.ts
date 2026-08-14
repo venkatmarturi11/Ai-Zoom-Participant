@@ -62,6 +62,7 @@ export class MeetingWorker {
         accessToken: this.context.config.accessToken,
         meetingId: this.context.config.zoomMeetingId,
         passcode: this.context.config.passcode,
+        displayName: this.context.config.displayName,
       });
 
       await this.context.adapter.initialize();

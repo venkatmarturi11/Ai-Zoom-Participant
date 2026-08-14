@@ -22,15 +22,25 @@ RUN npm install
 RUN npm run db:generate
 RUN npm run build
 
-# Production runner stage
+# Production runner stage with Chromium for headless Zoom participant
 FROM node:20-alpine AS runner
 
-RUN apk add --no-cache openssl libc6-compat
+RUN apk add --no-cache \
+    chromium \
+    nss \
+    freetype \
+    harfbuzz \
+    ca-certificates \
+    ttf-freefont \
+    openssl \
+    libc6-compat
 
 WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=10000
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 
 # Copy root files, built packages, and node_modules from builder
 COPY package*.json ./

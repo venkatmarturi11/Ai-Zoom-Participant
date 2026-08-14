@@ -9,8 +9,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@zoom-assistant/shared": "*",
+    "@zoom-assistant/crypto": "*",
     "@zoom-assistant/database": "*",
-    "@zoom-assistant/crypto": "*"
+    "@zoom-assistant/shared": "*",
+    "puppeteer-core": "^22.15.0"
   }
 }
