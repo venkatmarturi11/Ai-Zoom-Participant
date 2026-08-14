@@ -1,11 +1,12 @@
 import type { BotContext } from '../bot.js';
 import { userRepo, meetingRepo, auditRepo } from '@zoom-assistant/database';
+import { getMeetingRecordings, getValidAccessToken } from '@zoom-assistant/zoom';
 import { createLogger } from '@zoom-assistant/shared';
 
 const log = createLogger({ module: 'stop-command' });
 
 /**
- * /stop — Stop active meeting bot session immediately and display duration
+ * /stop — Stop active meeting bot session immediately and deliver recording / duration summary
  */
 export async function stopCommand(ctx: BotContext): Promise<void> {
   const telegramUserId = BigInt(ctx.from!.id);
@@ -52,13 +53,40 @@ export async function stopCommand(ctx: BotContext): Promise<void> {
     // DB error, continue
   }
 
+  // Check for Zoom Cloud Recordings
+  let recordingInfo = '';
+  try {
+    const tokens = await getValidAccessToken(user.id).catch(() => null);
+    if (tokens?.accessToken) {
+      const recordings = await getMeetingRecordings(active.zoomMeetingId, tokens.accessToken);
+      if (recordings && recordings.recordingFiles.length > 0) {
+        const mp4Files = recordings.recordingFiles.filter((f) => f.fileType === 'MP4');
+        if (mp4Files.length > 0) {
+          const mainVideo = mp4Files[0]!;
+          recordingInfo =
+            `\n🎬 <b>Meeting Recording:</b>\n` +
+            `📹 <b>Format:</b> MP4 Video\n` +
+            (mainVideo.playUrl ? `▶️ <a href="${mainVideo.playUrl}">Watch Recording Online</a>\n` : '') +
+            (mainVideo.downloadUrl ? `💾 <a href="${mainVideo.downloadUrl}">Download MP4 Video</a>\n` : '');
+        } else if (recordings.shareUrl) {
+          recordingInfo = `\n🎬 <b>Recording Link:</b> <a href="${recordings.shareUrl}">View Meeting Recording</a>\n`;
+        }
+      } else {
+        recordingInfo = `\n📹 <b>Zoom Cloud Recording:</b> <i>Processing on Zoom Cloud. If cloud recording was active in your Zoom room, it will appear in your Zoom Cloud Recordings once finished.</i>\n`;
+      }
+    }
+  } catch (recErr: any) {
+    log.warn({ error: recErr.message }, 'Failed to check recordings on stop');
+  }
+
   await ctx.reply(
     `✅ <b>Meeting Session Ended!</b>\n\n` +
     `📌 <b>Meeting ID:</b> <code>${active.zoomMeetingId}</code>\n` +
     `⏱️ <b>Attended Duration:</b> <code>${durationStr}</code>\n` +
-    `🤖 <b>Status:</b> Completed & Cleaned Up\n\n` +
-    `The assistant has finished the meeting. You can send another Zoom link anytime to start a new session!`,
-    { parse_mode: 'HTML' },
+    `🤖 <b>Status:</b> Completed & Cleaned Up\n` +
+    recordingInfo +
+    `\nThe assistant has finished the meeting. You can send another Zoom link anytime to start a new session!`,
+    { parse_mode: 'HTML', link_preview_options: { is_disabled: false } },
   );
 }
 

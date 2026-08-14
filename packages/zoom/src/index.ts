@@ -8,6 +8,7 @@ export {
 } from './oauth.js';
 export { getZakToken, type ZakTokenResponse } from './zak.js';
 export { getObfToken, type ObfTokenResponse } from './obf.js';
+export { getMeetingRecordings, type MeetingRecordingsResult, type RecordingFile } from './recordings.js';
 export { getValidAccessToken, type ValidatedTokens } from './token-manager.js';
 export {
   resolveCapability,
