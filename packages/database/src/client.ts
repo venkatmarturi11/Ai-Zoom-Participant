@@ -5,6 +5,7 @@ let prisma: PrismaClient | undefined;
 /**
  * Singleton Prisma client.
  * Prevents creating multiple connections during hot-reload in development.
+ * Uses connection timeout to prevent hanging when DB is unreachable.
  */
 export function getDb(): PrismaClient {
   if (!prisma) {

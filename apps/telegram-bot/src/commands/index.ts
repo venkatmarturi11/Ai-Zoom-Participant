@@ -19,16 +19,16 @@ const log = createLogger({ module: 'bot-commands' });
 
 export function registerCommands(bot: Bot<BotContext>): void {
   // Middleware to ensure user record exists on any command interaction
+  // This is completely non-blocking — if DB is down, commands still work
   bot.use(async (ctx, next) => {
     if (ctx.from) {
-      try {
-        await userRepo.upsert(BigInt(ctx.from.id), ctx.from.username);
-      } catch (err: any) {
-        log.error({ error: err.message }, 'Failed to upsert user record during command (continuing command execution)');
-      }
+      userRepo.upsert(BigInt(ctx.from.id), ctx.from.username).catch((err: any) => {
+        log.warn({ error: err?.message }, 'DB upsert failed (non-blocking, continuing)');
+      });
     }
     await next();
   });
+
 
   // Register command handlers
   bot.command('start', startCommand);

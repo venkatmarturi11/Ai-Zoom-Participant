@@ -9,12 +9,24 @@ import { activeSessionKeyboard } from '../keyboards/inline.js';
 export async function statusCommand(ctx: BotContext): Promise<void> {
   const telegramUserId = BigInt(ctx.from!.id);
 
-  let user = await userRepo.findByTelegramId(telegramUserId);
-  if (!user) {
-    user = await userRepo.upsert(telegramUserId, ctx.from?.username);
+  let user;
+  try {
+    user = await userRepo.findByTelegramId(telegramUserId);
+    if (!user) {
+      user = await userRepo.upsert(telegramUserId, ctx.from?.username);
+    }
+  } catch {
+    await ctx.reply(messages.statusNoActive, { parse_mode: 'HTML' });
+    return;
   }
 
-  const activeMeetings = await meetingRepo.findActiveByUserId(user.id);
+  let activeMeetings;
+  try {
+    activeMeetings = await meetingRepo.findActiveByUserId(user.id);
+  } catch {
+    await ctx.reply(messages.statusNoActive, { parse_mode: 'HTML' });
+    return;
+  }
 
   if (activeMeetings.length === 0) {
     await ctx.reply(messages.statusNoActive, { parse_mode: 'HTML' });

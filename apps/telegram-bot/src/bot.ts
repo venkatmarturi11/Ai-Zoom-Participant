@@ -74,8 +74,11 @@ export function createBot(): Bot<BotContext> {
     const ctx = err.ctx;
     const innerErr = err.error;
     const errorMsg = innerErr instanceof Error ? innerErr.message : String(innerErr);
-    log.error({ error: errorMsg, chatId: ctx.chat?.id }, 'Grammy bot error caught');
-    ctx.reply('⚠️ An unexpected error occurred. Please try again or send /help.', { parse_mode: 'HTML' }).catch(() => {});
+    const stack = innerErr instanceof Error ? innerErr.stack : undefined;
+    log.error({ error: errorMsg, stack, chatId: ctx.chat?.id, update: ctx.update?.update_id }, 'Grammy bot error caught');
+    ctx.reply('⚠️ An unexpected error occurred. Please try again or send /help.', { parse_mode: 'HTML' }).catch((replyErr) => {
+      log.warn({ error: replyErr instanceof Error ? replyErr.message : String(replyErr) }, 'Failed to send error reply to user');
+    });
   });
 
   return bot;
