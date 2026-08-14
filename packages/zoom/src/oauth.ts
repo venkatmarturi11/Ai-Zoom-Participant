@@ -114,3 +114,34 @@ export async function getZoomUserProfile(accessToken: string): Promise<ZoomUserP
 
   return (await response.json()) as ZoomUserProfile;
 }
+
+/**
+ * Server-to-Server OAuth token retrieval (grant_type=account_credentials)
+ */
+export async function getServerToServerAccessToken(
+  accountId: string,
+  clientId: string,
+  clientSecret: string,
+): Promise<string> {
+  const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+  const response = await fetch('https://zoom.us/oauth/token', {
+    method: 'POST',
+    headers: {
+      Authorization: `Basic ${credentials}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({
+      grant_type: 'account_credentials',
+      account_id: accountId,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    log.error({ status: response.status, body: errorBody }, 'Server-to-Server OAuth failed');
+    throw new ZoomError(ZoomErrorCode.SDK_AUTH_FAILED, 'Failed to fetch Server-to-Server OAuth token');
+  }
+
+  const data = (await response.json()) as OAuthTokenResponse;
+  return data.access_token;
+}
