@@ -23,10 +23,10 @@ export type BotContext = Context & {
 };
 
 export function createBot(): Bot<BotContext> {
-  const token = process.env['TELEGRAM_BOT_TOKEN'];
+  const token = process.env['TELEGRAM_BOT_TOKEN']?.trim();
   if (!token) {
-    log.fatal('TELEGRAM_BOT_TOKEN is not set');
-    process.exit(1);
+    log.error('TELEGRAM_BOT_TOKEN is not set');
+    throw new Error('TELEGRAM_BOT_TOKEN environment variable is missing');
   }
 
   const bot = new Bot<BotContext>(token);
