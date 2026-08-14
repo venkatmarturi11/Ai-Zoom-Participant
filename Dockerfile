@@ -39,8 +39,11 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=10000
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+
+# Symlink chromium to chromium-browser just in case
+RUN ln -s /usr/bin/chromium /usr/bin/chromium-browser || true
 
 # Copy root files, built packages, and node_modules from builder
 COPY package*.json ./

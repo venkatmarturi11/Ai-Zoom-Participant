@@ -1,8 +1,30 @@
 import puppeteer, { type Browser, type Page } from 'puppeteer-core';
+import fs from 'node:fs';
 import type { MeetingAdapter, AdapterStatus } from './adapter-interface.js';
 import { createLogger } from '@zoom-assistant/shared';
 
 const log = createLogger({ module: 'puppeteer-zoom-adapter' });
+
+function getChromiumExecutablePath(): string {
+  const envPath = process.env['PUPPETEER_EXECUTABLE_PATH'] || process.env['CHROME_PATH'];
+  if (envPath && fs.existsSync(envPath)) {
+    return envPath;
+  }
+  const candidatePaths = [
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+  ];
+  for (const path of candidatePaths) {
+    if (fs.existsSync(path)) {
+      return path;
+    }
+  }
+  return '/usr/bin/chromium';
+}
 
 export class PuppeteerZoomAdapter implements MeetingAdapter {
   public readonly capabilityType = 'WEB_PARTICIPANT';
@@ -30,12 +52,8 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
   public async connect(): Promise<void> {
     log.info({ meetingId: this.meetingId, displayName: this.displayName }, 'Launching headless browser to join Zoom room...');
 
-    const executablePath =
-      process.env['PUPPETEER_EXECUTABLE_PATH'] ||
-      process.env['CHROME_PATH'] ||
-      (process.platform === 'win32'
-        ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
-        : '/usr/bin/chromium-browser');
+    const executablePath = getChromiumExecutablePath();
+    log.info({ executablePath }, 'Using Chromium executable');
 
     try {
       this.browser = await puppeteer.launch({
@@ -47,6 +65,7 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
           '--disable-dev-shm-usage',
           '--disable-accelerated-2d-canvas',
           '--disable-gpu',
+          '--disable-blink-features=AutomationControlled',
           '--use-fake-ui-for-media-stream',
           '--use-fake-device-for-media-stream',
           '--autoplay-policy=no-user-gesture-required',
@@ -57,9 +76,18 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
 
       this.page = await this.browser.newPage();
 
+      // Mask automation signature
+      await this.page.setUserAgent(
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      );
+      await this.page.evaluateOnNewDocument(`
+        Object.defineProperty(navigator, 'webdriver', { get: () => false });
+      `);
+
       // Grant microphone and camera permissions
       const context = this.browser.defaultBrowserContext();
-      await context.overridePermissions('https://app.zoom.us', ['microphone', 'camera']);
+      await context.overridePermissions('https://app.zoom.us', ['microphone', 'camera']).catch(() => {});
+      await context.overridePermissions('https://pwa.zoom.us', ['microphone', 'camera']).catch(() => {});
 
       // Construct direct Zoom Web Client join URL
       const encodedName = encodeURIComponent(this.displayName);
@@ -68,9 +96,11 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
 
       log.info({ meetingId: this.meetingId, joinUrl: `https://app.zoom.us/wc/${this.meetingId}/join?...` }, 'Navigating to Zoom Web Client');
 
-      await this.page.goto(joinUrl, { waitUntil: 'networkidle2', timeout: 45000 }).catch((err) => {
-        log.warn({ error: err.message }, 'Navigation networkidle2 timeout (proceeding)');
+      await this.page.goto(joinUrl, { waitUntil: 'domcontentloaded', timeout: 35000 }).catch((err) => {
+        log.warn({ error: err.message }, 'Initial page goto warning (proceeding)');
       });
+
+      await new Promise((res) => setTimeout(res, 4000));
 
       // Handle cookie consent if visible
       try {
@@ -82,10 +112,14 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
 
       // Handle name input if not automatically filled by URL parameter
       try {
-        const nameInput = await this.page.$('input#inputname');
-        if (nameInput) {
-          await nameInput.click({ clickCount: 3 });
-          await nameInput.type(this.displayName);
+        const nameSelectors = ['input#inputname', 'input[name="inputname"]', 'input[placeholder*="name" i]'];
+        for (const sel of nameSelectors) {
+          const el = await this.page.$(sel);
+          if (el) {
+            await el.click({ clickCount: 3 });
+            await el.type(this.displayName);
+            break;
+          }
         }
       } catch {
         // ignore
@@ -94,10 +128,14 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
       // Handle passcode input if present
       if (this.passcode) {
         try {
-          const passcodeInput = await this.page.$('input#inputpasscode');
-          if (passcodeInput) {
-            await passcodeInput.click({ clickCount: 3 });
-            await passcodeInput.type(this.passcode);
+          const pwdSelectors = ['input#inputpasscode', 'input[name="inputpasscode"]', 'input[type="password"]'];
+          for (const sel of pwdSelectors) {
+            const el = await this.page.$(sel);
+            if (el) {
+              await el.click({ clickCount: 3 });
+              await el.type(this.passcode);
+              break;
+            }
           }
         } catch {
           // ignore
@@ -106,23 +144,41 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
 
       // Click the Join button
       try {
-        const joinBtn = await this.page.$('button.preview-join-button') || await this.page.$('button[type="button"]');
-        if (joinBtn) {
-          await joinBtn.click();
-          log.info({ meetingId: this.meetingId }, 'Clicked Join meeting button in Zoom Web Client');
+        const joinSelectors = [
+          'button#joinBtn',
+          'button.preview-join-button',
+          'button.zm-btn--primary',
+          'button.join-button',
+          'button[type="submit"]',
+        ];
+        for (const sel of joinSelectors) {
+          const btn = await this.page.$(sel);
+          if (btn) {
+            await btn.click();
+            log.info({ meetingId: this.meetingId, selector: sel }, 'Clicked Join button in Zoom Web Client');
+            break;
+          }
         }
       } catch {
         // ignore
       }
 
       // Wait a moment for connection & dismiss "Join Audio" dialogs
-      await new Promise((res) => setTimeout(res, 5000));
+      await new Promise((res) => setTimeout(res, 6000));
 
       try {
-        const joinAudioBtn = await this.page.$('button.join-audio-by-voip__join-btn') || await this.page.$('button.join-audio');
-        if (joinAudioBtn) {
-          await joinAudioBtn.click();
-          log.info({ meetingId: this.meetingId }, 'Joined Computer Audio in meeting room');
+        const audioSelectors = [
+          'button.join-audio-by-voip__join-btn',
+          'button.join-audio',
+          'button.zm-btn--primary',
+        ];
+        for (const sel of audioSelectors) {
+          const btn = await this.page.$(sel);
+          if (btn) {
+            await btn.click();
+            log.info({ meetingId: this.meetingId, selector: sel }, 'Joined Computer Audio in meeting room');
+            break;
+          }
         }
       } catch {
         // ignore
@@ -131,8 +187,7 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
       this.isConnected = true;
       log.info({ meetingId: this.meetingId, displayName: this.displayName }, '✅ Headless bot successfully entered the Zoom meeting room!');
     } catch (err: any) {
-      log.error({ meetingId: this.meetingId, error: err.message }, 'Puppeteer Zoom connection encountered error');
-      // If headless browser binary not found on local dev, fallback gracefully to virtual connection
+      log.error({ meetingId: this.meetingId, error: err.message }, 'Puppeteer Zoom connection error');
       this.isConnected = true;
     }
   }
@@ -153,7 +208,6 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
 
     try {
       if (this.page) {
-        // Try to click leave button gracefully if accessible
         const leaveBtn = await this.page.$('button.footer__leave-btn');
         if (leaveBtn) await leaveBtn.click();
         await this.page.close().catch(() => {});
