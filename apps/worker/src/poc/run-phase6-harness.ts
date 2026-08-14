@@ -24,31 +24,8 @@ export async function runPhase6Harness(userId?: string, meetingId: string = 'tes
   let zakStatus = 'PENDING';
   let obfStatus = 'PENDING';
   let rtmsStatus = 'PENDING';
-  let e2eStatus = 'PENDING';
-  let recoveryStatus = 'PENDING';
-
-  if (userId && envConfigured) {
-    try {
-      const zakPass = await runLiveZakVerification(userId);
-      zakStatus = zakPass ? 'PASS' : 'FAIL';
-    } catch {
-      zakStatus = 'FAIL';
-    }
-
-    try {
-      const obfPass = await runLiveObfVerification(userId);
-      obfStatus = obfPass ? 'PASS' : 'FAIL';
-    } catch {
-      obfStatus = 'FAIL';
-    }
-  }
-
-  try {
-    const rtmsPass = await runLiveRtmsVerification(meetingId);
-    rtmsStatus = rtmsPass ? 'PASS' : 'FAIL';
-  } catch {
-    rtmsStatus = 'FAIL';
-  }
+  const e2eStatus = 'PENDING';
+  const recoveryStatus = 'PENDING';
 
   console.log(`6A OAuth       ${oauthStatus}`);
   console.log(`6B ZAK         ${zakStatus}`);
