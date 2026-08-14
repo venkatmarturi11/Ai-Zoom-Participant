@@ -1,5 +1,5 @@
 import { createServer } from './server.js';
-import { createBot, setupBotCommands } from '@zoom-assistant/telegram-bot';
+import { createBot, setupBotCommands, notificationService } from '@zoom-assistant/telegram-bot';
 import { createLogger } from '@zoom-assistant/shared';
 
 // Polyfill BigInt serialization to prevent JSON.stringify crashes across Fastify & Pino loggers
@@ -24,40 +24,37 @@ async function main() {
   }
 
   // Launch Telegram bot long-polling in background so port healthcheck resolves instantly
-  setImmediate(() => {
+  setImmediate(async () => {
     const botToken = process.env['TELEGRAM_BOT_TOKEN']?.trim();
     if (!botToken) {
       log.warn('TELEGRAM_BOT_TOKEN environment variable is missing; bot polling skipped.');
       return;
     }
 
-    async function startBotLoop() {
-      while (true) {
-        try {
-          log.info('Initializing background Telegram bot listener...');
-          const bot = createBot();
-          await bot.api.deleteWebhook({ drop_pending_updates: true }).catch((err: any) => {
-            log.warn({ error: err?.message }, 'Failed to delete webhook (proceeding)');
-          });
-          await setupBotCommands(bot).catch((err: any) => {
-            log.warn({ error: err?.message }, 'Failed to setup bot commands menu (proceeding)');
-          });
-          log.info('🤖 Starting Telegram Bot long-polling loop...');
-          await bot.start({
-            drop_pending_updates: true,
-            onStart: (info) => {
-              log.info({ username: info.username }, '🤖 Telegram Bot is online and listening for messages!');
-            },
-          });
-          log.warn('Telegram bot runner loop stopped unexpectedly, restarting in 3s...');
-        } catch (err: any) {
-          log.error({ error: err?.message || String(err) }, 'Telegram bot error, restarting in 3s...');
-        }
-        await new Promise((resolve) => setTimeout(resolve, 3000));
-      }
-    }
+    try {
+      log.info('Initializing Telegram bot listener in Web Service process...');
+      const bot = createBot();
 
-    startBotLoop();
+      await bot.api.deleteWebhook({ drop_pending_updates: true }).catch((err: any) => {
+        log.warn({ error: err?.message }, 'Failed to delete webhook (proceeding)');
+      });
+
+      await setupBotCommands(bot).catch((err: any) => {
+        log.warn({ error: err?.message }, 'Failed to setup bot commands menu (proceeding)');
+      });
+
+      notificationService.start(bot);
+
+      log.info('🤖 Starting Telegram Bot long-polling runner...');
+      bot.start({
+        drop_pending_updates: true,
+        onStart: (info) => {
+          log.info({ username: info.username }, '🤖 Telegram Bot is online and listening for messages!');
+        },
+      });
+    } catch (err: any) {
+      log.error({ error: err?.message || String(err) }, 'Failed to start Telegram bot listener');
+    }
   });
 }
 
