@@ -1,6 +1,8 @@
 # Multi-stage Dockerfile for Render Web Service / Node.js Monorepo
 FROM node:20-alpine AS builder
 
+RUN apk add --no-cache openssl libc6-compat
+
 WORKDIR /app
 
 # Set dummy DATABASE_URL for Prisma Client generation during build stage
@@ -22,6 +24,8 @@ RUN npm run build
 
 # Production runner stage
 FROM node:20-alpine AS runner
+
+RUN apk add --no-cache openssl libc6-compat
 
 WORKDIR /app
 
