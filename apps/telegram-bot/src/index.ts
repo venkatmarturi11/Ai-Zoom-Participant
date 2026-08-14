@@ -29,18 +29,12 @@ async function main() {
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
 
-  // Start in polling mode for development
-  // Production uses webhook via the API server
-  if (process.env['NODE_ENV'] !== 'production') {
-    log.info('Starting bot in polling mode (development)');
-    bot.start({
-      onStart: (info) => {
-        log.info({ username: info.username }, '🤖 Bot is running with Telegram Menu commands configured');
-      },
-    });
-  } else {
-    log.info('Production mode — bot expects webhook from API server');
-  }
+  log.info('Starting bot long-polling runner...');
+  bot.start({
+    onStart: (info) => {
+      log.info({ username: info.username }, '🤖 Bot is running and listening for Telegram commands');
+    },
+  });
 }
 
 // Only auto-start main() when run directly as CLI script
