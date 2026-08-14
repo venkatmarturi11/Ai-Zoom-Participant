@@ -69,9 +69,13 @@ export function createBot(): Bot<BotContext> {
     await ctx.answerCallbackQuery();
   });
 
-  // Error handler
+  // Global robust Error handler to keep bot polling 24/7
   bot.catch((err) => {
-    log.error({ error: err.message, stack: err.stack }, 'Bot error');
+    const ctx = err.ctx;
+    const innerErr = err.error;
+    const errorMsg = innerErr instanceof Error ? innerErr.message : String(innerErr);
+    log.error({ error: errorMsg, chatId: ctx.chat?.id }, 'Grammy bot error caught');
+    ctx.reply('⚠️ An unexpected error occurred. Please try again or send /help.', { parse_mode: 'HTML' }).catch(() => {});
   });
 
   return bot;

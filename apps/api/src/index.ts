@@ -24,30 +24,36 @@ async function main() {
   }
 
   // Launch Telegram bot long-polling in background so port healthcheck resolves instantly
-  setImmediate(async () => {
+  setImmediate(() => {
     const botToken = process.env['TELEGRAM_BOT_TOKEN']?.trim();
     if (!botToken) {
       log.warn('TELEGRAM_BOT_TOKEN environment variable is missing; bot polling skipped.');
       return;
     }
 
-    try {
-      log.info('Initializing background Telegram bot listener...');
-      const bot = createBot();
-      await bot.api.deleteWebhook({ drop_pending_updates: false }).catch((err: any) => {
-        log.warn({ error: err.message }, 'Failed to delete webhook (proceeding)');
-      });
-      await setupBotCommands(bot).catch((err: any) => {
-        log.warn({ error: err.message }, 'Failed to setup bot commands menu (proceeding)');
-      });
-      bot.start({
-        onStart: (info) => {
-          log.info({ username: info.username }, '🤖 Telegram Bot is online and listening for messages!');
-        },
-      });
-    } catch (err: any) {
-      log.error({ error: err.message }, 'Background Telegram bot initialization error');
+    async function startBotLoop() {
+      try {
+        log.info('Initializing background Telegram bot listener...');
+        const bot = createBot();
+        await bot.api.deleteWebhook({ drop_pending_updates: true }).catch((err: any) => {
+          log.warn({ error: err.message }, 'Failed to delete webhook (proceeding)');
+        });
+        await setupBotCommands(bot).catch((err: any) => {
+          log.warn({ error: err.message }, 'Failed to setup bot commands menu (proceeding)');
+        });
+        await bot.start({
+          drop_pending_updates: true,
+          onStart: (info) => {
+            log.info({ username: info.username }, '🤖 Telegram Bot is online and listening for messages!');
+          },
+        });
+      } catch (err: any) {
+        log.error({ error: err?.message || String(err) }, 'Telegram bot long-polling error, restarting in 5s...');
+        setTimeout(startBotLoop, 5000);
+      }
     }
+
+    startBotLoop();
   });
 }
 
