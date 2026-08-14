@@ -18,25 +18,32 @@ async function main() {
     process.exit(1);
   }
 
-  // Start Telegram Bot long-polling directly in the main Web Service process
-  const botToken = process.env['TELEGRAM_BOT_TOKEN']?.trim();
-  if (botToken) {
+  // Launch Telegram bot long-polling in background so port healthcheck resolves instantly
+  setImmediate(async () => {
+    const botToken = process.env['TELEGRAM_BOT_TOKEN']?.trim();
+    if (!botToken) {
+      log.warn('TELEGRAM_BOT_TOKEN environment variable is missing; bot polling skipped.');
+      return;
+    }
+
     try {
-      log.info('Initializing Telegram bot listener in Web Service process...');
+      log.info('Initializing background Telegram bot listener...');
       const bot = createBot();
-      await bot.api.deleteWebhook({ drop_pending_updates: false });
-      await setupBotCommands(bot);
+      await bot.api.deleteWebhook({ drop_pending_updates: false }).catch((err: any) => {
+        log.warn({ error: err.message }, 'Failed to delete webhook (proceeding)');
+      });
+      await setupBotCommands(bot).catch((err: any) => {
+        log.warn({ error: err.message }, 'Failed to setup bot commands menu (proceeding)');
+      });
       bot.start({
         onStart: (info) => {
           log.info({ username: info.username }, '🤖 Telegram Bot is online and listening for messages!');
         },
       });
     } catch (err: any) {
-      log.error({ error: err.message }, 'Failed to start Telegram bot listener');
+      log.error({ error: err.message }, 'Background Telegram bot initialization error');
     }
-  } else {
-    log.warn('TELEGRAM_BOT_TOKEN environment variable is missing; bot polling not started.');
-  }
+  });
 }
 
 main();
