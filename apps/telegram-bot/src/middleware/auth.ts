@@ -11,7 +11,7 @@ const log = createLogger({ module: 'auth-middleware' });
  * Usernames can change; user IDs are permanent.
  *
  * For a personal bot: whitelist via AUTHORIZED_TELEGRAM_IDS env var.
- * For a multi-user SaaS: check against the users database table.
+ * If set to '*' or empty: allows all users.
  */
 export async function authMiddleware(ctx: BotContext, next: NextFunction): Promise<void> {
   const userId = ctx.from?.id;
@@ -23,21 +23,24 @@ export async function authMiddleware(ctx: BotContext, next: NextFunction): Promi
 
   log.info({ userId, text: ctx.message?.text }, 'Received update from Telegram user');
 
-  const authorizedIds = process.env['AUTHORIZED_TELEGRAM_IDS'];
-  if (!authorizedIds) {
-    log.fatal('AUTHORIZED_TELEGRAM_IDS is not configured');
-    await ctx.reply('⚠️ Bot is not configured. Contact the administrator.');
+  const authorizedIds = process.env['AUTHORIZED_TELEGRAM_IDS']?.trim();
+
+  // If AUTHORIZED_TELEGRAM_IDS is empty or set to '*', allow all users
+  if (!authorizedIds || authorizedIds === '*') {
+    await next();
     return;
   }
 
   const allowedIds = authorizedIds
-    .split(',')
-    .map((id) => id.trim())
+    .split(/[\s,]+/)
+    .map((id) => id.replace(/['"]/g, '').trim())
     .filter(Boolean);
 
-  if (!allowedIds.includes(String(userId))) {
-    log.warn({ telegramUserId: userId }, 'Unauthorized access attempt');
-    await ctx.reply('⛔ Unauthorized.');
+  if (!allowedIds.includes('*') && !allowedIds.includes(String(userId))) {
+    log.warn({ telegramUserId: userId, allowedIds }, 'Unauthorized access attempt');
+    await ctx.reply(`⛔ Unauthorized access.\n\nYour Telegram User ID is: <code>${userId}</code>\n\nPlease add this ID to <code>AUTHORIZED_TELEGRAM_IDS</code> in your environment settings.`, {
+      parse_mode: 'HTML',
+    });
     return;
   }
 
