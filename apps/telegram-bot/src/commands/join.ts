@@ -2,10 +2,9 @@ import type { BotContext } from '../bot.js';
 import { messages } from '../formatters/messages.js';
 import { meetingActionsKeyboard, activeSessionKeyboard } from '../keyboards/inline.js';
 import { parseMeetingUrl, extractZoomUrl } from '@zoom-assistant/meeting-parser';
-import { userRepo, zoomAccountRepo, meetingRepo, meetingService } from '@zoom-assistant/database';
+import { userRepo, zoomAccountRepo, meetingRepo } from '@zoom-assistant/database';
+import { meetingService } from '@zoom-assistant/orchestrator';
 import { createLogger } from '@zoom-assistant/shared';
-
-
 
 const log = createLogger({ module: 'join-command' });
 

@@ -4,4 +4,4 @@ export {
   type CreateMeetingParams,
   type ScheduleMeetingParams,
   type ServiceMeetingResult,
-} from '@zoom-assistant/orchestrator';
+} from './services/meeting-service.js';

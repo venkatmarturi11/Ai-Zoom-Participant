@@ -4,7 +4,7 @@ import {
   meetingRepo,
   auditRepo,
   type Meeting,
-} from '../index.js';
+} from '@zoom-assistant/database';
 import { queueProducers } from '@zoom-assistant/queue';
 import { resolveCapability, type CapabilityResolution } from '@zoom-assistant/zoom';
 import { encryptToken } from '@zoom-assistant/crypto';

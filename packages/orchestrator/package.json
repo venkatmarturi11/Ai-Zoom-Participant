@@ -1,0 +1,18 @@
+{
+  "name": "@zoom-assistant/orchestrator",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\" && tsc",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@zoom-assistant/shared": "*",
+    "@zoom-assistant/database": "*",
+    "@zoom-assistant/queue": "*",
+    "@zoom-assistant/zoom": "*",
+    "@zoom-assistant/crypto": "*"
+  }
+}

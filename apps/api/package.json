@@ -16,7 +16,8 @@
     "@zoom-assistant/shared": "*",
     "@zoom-assistant/database": "*",
     "@zoom-assistant/crypto": "*",
-    "@zoom-assistant/zoom": "*"
+    "@zoom-assistant/zoom": "*",
+    "@zoom-assistant/orchestrator": "*"
   },
   "devDependencies": {
     "tsx": "^4.16.0"
