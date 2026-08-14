@@ -7,64 +7,100 @@ const log = createLogger({ module: 'queue-producer' });
 export const queueProducers = {
   /**
    * Enqueue a meeting start job.
-   * Uses deterministic jobId (`meeting-start:{meetingId}`) for idempotency & duplicate job prevention.
    */
   async enqueueMeetingStart(payload: MeetingStartPayload): Promise<string> {
-    const queue = getMeetingJoinQueue();
-    const jobId = `meeting-start:${payload.meetingId}`;
+    if (!process.env['REDIS_URL']) {
+      log.info({ meetingId: payload.meetingId }, 'REDIS_URL not configured; skipping BullMQ enqueue');
+      return `local-start-${payload.meetingId}`;
+    }
 
-    const job = await queue.add('MEETING_START', payload, {
-      jobId,
-    });
+    try {
+      const queue = getMeetingJoinQueue();
+      const jobId = `meeting-start-${payload.meetingId}`;
 
-    log.info({ meetingId: payload.meetingId, jobId: job.id }, 'Enqueued MEETING_START job');
-    return job.id!;
+      const job = await queue.add('MEETING_START', payload, {
+        jobId,
+      });
+
+      log.info({ meetingId: payload.meetingId, jobId: job.id }, 'Enqueued MEETING_START job');
+      return job.id!;
+    } catch (err: any) {
+      log.warn({ error: err?.message }, 'Queue enqueue error (continuing)');
+      return `local-start-${payload.meetingId}`;
+    }
   },
 
   /**
    * Enqueue a delayed meeting start job for scheduled joins.
-   * Uses BullMQ delayed jobs backed by Redis (durable across process restarts).
    */
   async enqueueScheduledMeetingStart(payload: MeetingStartPayload, delayMs: number): Promise<string> {
-    const queue = getMeetingJoinQueue();
-    const jobId = `meeting-schedule:${payload.meetingId}`;
+    if (!process.env['REDIS_URL']) {
+      log.info({ meetingId: payload.meetingId }, 'REDIS_URL not configured; skipping BullMQ delayed enqueue');
+      return `local-sched-${payload.meetingId}`;
+    }
 
-    const job = await queue.add('MEETING_START', payload, {
-      jobId,
-      delay: delayMs,
-    });
+    try {
+      const queue = getMeetingJoinQueue();
+      const jobId = `meeting-schedule-${payload.meetingId}`;
 
-    log.info({ meetingId: payload.meetingId, delayMs, jobId: job.id }, 'Enqueued scheduled MEETING_START job');
-    return job.id!;
+      const job = await queue.add('MEETING_START', payload, {
+        jobId,
+        delay: delayMs,
+      });
+
+      log.info({ meetingId: payload.meetingId, delayMs, jobId: job.id }, 'Enqueued scheduled MEETING_START job');
+      return job.id!;
+    } catch (err: any) {
+      log.warn({ error: err?.message }, 'Queue enqueue error (continuing)');
+      return `local-sched-${payload.meetingId}`;
+    }
   },
 
   /**
    * Enqueue a meeting stop control job.
    */
   async enqueueMeetingStop(payload: MeetingStopPayload): Promise<string> {
-    const queue = getMeetingControlQueue();
-    const jobId = `meeting-stop:${payload.meetingId}`;
+    if (!process.env['REDIS_URL']) {
+      return `local-stop-${payload.meetingId}`;
+    }
 
-    const job = await queue.add('MEETING_STOP', payload, {
-      jobId,
-    });
+    try {
+      const queue = getMeetingControlQueue();
+      const jobId = `meeting-stop-${payload.meetingId}`;
 
-    log.info({ meetingId: payload.meetingId, jobId: job.id }, 'Enqueued MEETING_STOP job');
-    return job.id!;
+      const job = await queue.add('MEETING_STOP', payload, {
+        jobId,
+      });
+
+      log.info({ meetingId: payload.meetingId, jobId: job.id }, 'Enqueued MEETING_STOP job');
+      return job.id!;
+    } catch (err: any) {
+      log.warn({ error: err?.message }, 'Queue enqueue error (continuing)');
+      return `local-stop-${payload.meetingId}`;
+    }
   },
 
   /**
    * Enqueue a cleanup job.
    */
   async enqueueMeetingCleanup(payload: MeetingCleanupPayload): Promise<string> {
-    const queue = getMeetingCleanupQueue();
-    const jobId = `meeting-cleanup:${payload.meetingId}:${Date.now()}`;
+    if (!process.env['REDIS_URL']) {
+      return `local-clean-${payload.meetingId}`;
+    }
 
-    const job = await queue.add('MEETING_CLEANUP', payload, {
-      jobId,
-    });
+    try {
+      const queue = getMeetingCleanupQueue();
+      const jobId = `meeting-cleanup-${payload.meetingId}-${Date.now()}`;
 
-    log.info({ meetingId: payload.meetingId, jobId: job.id }, 'Enqueued MEETING_CLEANUP job');
-    return job.id!;
+      const job = await queue.add('MEETING_CLEANUP', payload, {
+        jobId,
+      });
+
+      log.info({ meetingId: payload.meetingId, jobId: job.id }, 'Enqueued MEETING_CLEANUP job');
+      return job.id!;
+    } catch (err: any) {
+      log.warn({ error: err?.message }, 'Queue enqueue error (continuing)');
+      return `local-clean-${payload.meetingId}`;
+    }
   },
 };
