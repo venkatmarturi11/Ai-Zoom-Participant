@@ -76,7 +76,18 @@ async function main() {
     }
   });
 
-  // 3. Launch Telegram Bot polling asynchronously in background
+  // 3. Keep-alive self-ping every 10 minutes to prevent Render free instance from hibernating
+  setInterval(async () => {
+    try {
+      const selfUrl = process.env['RENDER_EXTERNAL_URL'] || `http://localhost:${port}`;
+      await fetch(`${selfUrl}/health`).catch(() => {});
+      log.debug('Sent keep-alive ping');
+    } catch {
+      // ignore
+    }
+  }, 10 * 60 * 1000);
+
+  // 4. Launch Telegram Bot polling asynchronously in background
   setImmediate(() => {
     const botToken = process.env['TELEGRAM_BOT_TOKEN']?.trim();
     if (!botToken) {
