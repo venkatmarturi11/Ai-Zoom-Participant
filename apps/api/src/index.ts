@@ -2,6 +2,11 @@ import { createServer } from './server.js';
 import { createBot, setupBotCommands } from '@zoom-assistant/telegram-bot';
 import { createLogger } from '@zoom-assistant/shared';
 
+// Polyfill BigInt serialization to prevent JSON.stringify crashes across Fastify & Pino loggers
+(BigInt.prototype as any).toJSON = function () {
+  return this.toString();
+};
+
 const log = createLogger({ module: 'api-entry' });
 
 async function main() {

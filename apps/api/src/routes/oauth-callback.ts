@@ -172,8 +172,32 @@ export const oauthRoutes: FastifyPluginAsync = async (fastify) => {
         </html>
       `);
     } catch (err: any) {
-      log.error({ error: err.message }, 'OAuth callback handler error');
-      return reply.status(500).send(`Failed to complete Zoom authorization: ${err.message || String(err)}`);
+      const errMsg = err?.message || String(err);
+      log.error({ error: errMsg }, 'OAuth callback handler error');
+      return reply.type('text/html').send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Zoom Connection Error</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align: center; padding: 40px 20px; background: #0f172a; color: #f8fafc; }
+            .card { max-width: 440px; margin: 0 auto; background: #1e293b; padding: 30px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); border: 1px solid #ef4444; }
+            h2 { color: #f87171; margin-bottom: 10px; }
+            p { color: #94a3b8; font-size: 14px; line-height: 1.5; }
+            .err { background: #451a1a; padding: 12px; border-radius: 8px; font-family: monospace; color: #fca5a5; display: block; margin: 15px 0; word-break: break-all; text-align: left; font-size: 12px; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <h2>⚠️ Authorization Error</h2>
+            <p>Could not complete Zoom OAuth token exchange:</p>
+            <div class="err">${errMsg}</div>
+            <p>Please ensure <code>ZOOM_CLIENT_ID</code> and <code>ZOOM_CLIENT_SECRET</code> on Render match your Zoom Marketplace app, and try clicking Connect Zoom again from Telegram.</p>
+          </div>
+        </body>
+        </html>
+      `);
     }
   }
 };
