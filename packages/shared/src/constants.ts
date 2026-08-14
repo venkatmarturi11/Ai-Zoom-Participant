@@ -93,13 +93,14 @@ export const NOTIFICATION_EVENTS = {
 } as const;
 
 // ============================================================
-// BullMQ queue / job names
+// BullMQ queue / job names (must NOT contain colons)
 // ============================================================
 
 export const QUEUE_NAMES = {
-  MEETING_JOIN: 'meeting:join',
-  MEETING_SCHEDULE: 'meeting:schedule',
-  MEETING_TIMEOUT: 'meeting:timeout',
-  MEETING_CLEANUP: 'meeting:cleanup',
-  TOKEN_REFRESH: 'token:refresh',
+  MEETING_JOIN: 'meeting-join',
+  MEETING_CONTROL: 'meeting-control',
+  MEETING_SCHEDULE: 'meeting-schedule',
+  MEETING_TIMEOUT: 'meeting-timeout',
+  MEETING_CLEANUP: 'meeting-cleanup',
+  TOKEN_REFRESH: 'token-refresh',
 } as const;

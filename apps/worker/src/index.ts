@@ -74,9 +74,9 @@ async function main() {
     { connection },
   );
 
-  // 2. Queue Worker for meeting:control queue
+  // 2. Queue Worker for meeting control queue
   const controlWorker = new Worker<MeetingStopPayload>(
-    'meeting:control',
+    QUEUE_NAMES.MEETING_CONTROL,
     async (job) => {
       const payload = job.data;
       log.info({ meetingId: payload.meetingId, jobId: job.id, name: job.name }, 'Processing meeting control job');

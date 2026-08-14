@@ -24,7 +24,7 @@ export function getMeetingJoinQueue(): Queue {
 
 export function getMeetingControlQueue(): Queue {
   if (!meetingControlQueue) {
-    meetingControlQueue = new Queue('meeting:control', {
+    meetingControlQueue = new Queue(QUEUE_NAMES.MEETING_CONTROL, {
       connection: getRedisConnection(),
       defaultJobOptions: {
         removeOnComplete: { count: 100 },
