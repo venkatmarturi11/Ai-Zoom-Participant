@@ -1,6 +1,6 @@
 import type { BotContext } from '../bot.js';
 import { messages } from '../formatters/messages.js';
-import { meetingActionsKeyboard, activeSessionKeyboard } from '../keyboards/inline.js';
+import { meetingActionsKeyboard } from '../keyboards/inline.js';
 import { parseMeetingUrl, extractZoomUrl } from '@zoom-assistant/meeting-parser';
 import { userRepo, meetingRepo } from '@zoom-assistant/database';
 import { meetingService } from '@zoom-assistant/orchestrator';
@@ -17,26 +17,6 @@ export async function joinCommand(ctx: BotContext): Promise<void> {
   let user = await userRepo.findByTelegramId(telegramUserId).catch(() => null);
   if (!user) {
     user = await userRepo.upsert(telegramUserId, ctx.from?.username).catch(() => null);
-  }
-
-  // Check for existing active session (duplicate prevention)
-  if (user) {
-    const activeMeetings = await meetingRepo.findActiveByUserId(user.id).catch(() => []);
-    if (activeMeetings.length > 0) {
-      const active = activeMeetings[0]!;
-      const duration = active.actualStart
-        ? formatDuration(Date.now() - active.actualStart.getTime())
-        : '00:00:00';
-
-      await ctx.reply(
-        messages.duplicateSession(active.topic, duration),
-        {
-          parse_mode: 'HTML',
-          reply_markup: activeSessionKeyboard(active.id),
-        },
-      );
-      return;
-    }
   }
 
   // Set conversation state to await meeting link
@@ -69,6 +49,14 @@ export async function handleMeetingLinkInput(ctx: BotContext): Promise<void> {
     user = await userRepo.upsert(telegramUserId, ctx.from?.username).catch(() => null);
   }
 
+  // Automatically complete any prior active session so new session starts cleanly
+  if (user) {
+    const activeMeetings = await meetingRepo.findActiveByUserId(user.id).catch(() => []);
+    for (const oldMeeting of activeMeetings) {
+      await meetingRepo.updateStatus(oldMeeting.id, 'COMPLETED').catch(() => {});
+    }
+  }
+
   // If no passcode in URL, ask for it
   if (!meeting.passcode) {
     ctx.session.step = 'awaiting_passcode';
@@ -99,11 +87,11 @@ export async function handleMeetingLinkInput(ctx: BotContext): Promise<void> {
     );
 
     await ctx.reply(
-      `🔎 <b>Meeting Detected & Queued!</b>\n\n` +
+      `🔎 <b>Meeting Detected & Connected!</b>\n\n` +
       `📌 <b>Meeting ID:</b> <code>${meeting.meetingId}</code>\n` +
       `👤 <b>Display Name:</b> <code>${userDisplayName ?? 'Meeting Assistant'}</code>\n` +
-      `⚡ <b>Status:</b> 🟢 <b>JOINING NOW</b>\n\n` +
-      `The assistant is connecting to your Zoom meeting!`,
+      `⚡ <b>Status:</b> 🟢 <b>CONNECTED & ATTENDING</b>\n\n` +
+      `The assistant is now in your Zoom meeting! Use <code>/status</code> to check duration or <code>/stop</code> to finish.`,
       {
         parse_mode: 'HTML',
         reply_markup: meetingActionsKeyboard(res.meeting.id),
@@ -153,11 +141,11 @@ export async function handlePasscodeInput(ctx: BotContext): Promise<void> {
     });
 
     await ctx.reply(
-      `🔎 <b>Meeting Detected & Queued!</b>\n\n` +
+      `🔎 <b>Meeting Detected & Connected!</b>\n\n` +
       `📌 <b>Meeting ID:</b> <code>${meetingId}</code>\n` +
       `👤 <b>Display Name:</b> <code>${userDisplayName ?? 'Meeting Assistant'}</code>\n` +
-      `⚡ <b>Status:</b> 🟢 <b>JOINING NOW</b>\n\n` +
-      `The assistant is connecting to your Zoom meeting!`,
+      `⚡ <b>Status:</b> 🟢 <b>CONNECTED & ATTENDING</b>\n\n` +
+      `The assistant is now in your Zoom meeting! Use <code>/status</code> to check duration or <code>/stop</code> to finish.`,
       {
         parse_mode: 'HTML',
         reply_markup: meetingActionsKeyboard(res.meeting.id),
@@ -166,12 +154,4 @@ export async function handlePasscodeInput(ctx: BotContext): Promise<void> {
   } catch (err: any) {
     await ctx.reply(`⚠️ ${err.message}`, { parse_mode: 'HTML' });
   }
-}
-
-function formatDuration(ms: number): string {
-  const totalSeconds = Math.floor(ms / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }

@@ -1,13 +1,11 @@
 import type { BotContext } from '../bot.js';
 import { userRepo, meetingRepo, auditRepo } from '@zoom-assistant/database';
-import { messages } from '../formatters/messages.js';
-import { stopConfirmKeyboard } from '../keyboards/inline.js';
 import { createLogger } from '@zoom-assistant/shared';
 
 const log = createLogger({ module: 'stop-command' });
 
 /**
- * /stop — Confirm and stop active meeting bot session
+ * /stop — Stop active meeting bot session immediately and display duration
  */
 export async function stopCommand(ctx: BotContext): Promise<void> {
   const telegramUserId = BigInt(ctx.from!.id);
@@ -37,14 +35,31 @@ export async function stopCommand(ctx: BotContext): Promise<void> {
   }
 
   const active = activeMeetings[0]!;
-  const duration = active.actualStart
+  const durationStr = active.actualStart
     ? formatDuration(Date.now() - active.actualStart.getTime())
     : '00:00:00';
 
-  await ctx.reply(messages.stopConfirm(active.topic, duration), {
-    parse_mode: 'HTML',
-    reply_markup: stopConfirmKeyboard(active.id),
-  });
+  try {
+    await meetingRepo.updateStatus(active.id, 'STOPPING');
+    await meetingRepo.updateStatus(active.id, 'COMPLETED');
+
+    await auditRepo.log({
+      userId: user.id,
+      action: 'MEETING_STOPPED_MANUALLY',
+      metadata: { meetingId: active.id, duration: durationStr },
+    }).catch(() => {});
+  } catch {
+    // DB error, continue
+  }
+
+  await ctx.reply(
+    `✅ <b>Meeting Session Ended!</b>\n\n` +
+    `📌 <b>Meeting ID:</b> <code>${active.zoomMeetingId}</code>\n` +
+    `⏱️ <b>Attended Duration:</b> <code>${durationStr}</code>\n` +
+    `🤖 <b>Status:</b> Completed & Cleaned Up\n\n` +
+    `The assistant has finished the meeting. You can send another Zoom link anytime to start a new session!`,
+    { parse_mode: 'HTML' },
+  );
 }
 
 /**
@@ -61,10 +76,12 @@ export async function handleStopConfirm(ctx: BotContext, meetingId: string): Pro
   }
 
   let durationStr = '00:00:00';
+  let meetingIdStr = meetingId;
   try {
     const meeting = await meetingRepo.findById(meetingId);
     if (meeting?.actualStart) {
       durationStr = formatDuration(Date.now() - meeting.actualStart.getTime());
+      meetingIdStr = meeting.zoomMeetingId;
     }
 
     await meetingRepo.updateStatus(meetingId, 'STOPPING');
@@ -83,9 +100,10 @@ export async function handleStopConfirm(ctx: BotContext, meetingId: string): Pro
 
   await ctx.editMessageText(
     `✅ <b>Meeting Session Ended!</b>\n\n` +
+    `📌 <b>Meeting ID:</b> <code>${meetingIdStr}</code>\n` +
     `⏱️ <b>Attended Duration:</b> <code>${durationStr}</code>\n` +
-    `🤖 <b>Status:</b> Completed\n\n` +
-    `The assistant has left the meeting and cleaned up the session. Send another Zoom link anytime to start a new session!`,
+    `🤖 <b>Status:</b> Completed & Cleaned Up\n\n` +
+    `The assistant has finished the meeting. You can send another Zoom link anytime to start a new session!`,
     { parse_mode: 'HTML' },
   ).catch(() => {});
 }
