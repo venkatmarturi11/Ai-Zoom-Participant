@@ -45,10 +45,7 @@ async function main() {
   });
 }
 
-// Only auto-start main() when run directly as CLI script
-if (process.argv[1]?.endsWith('index.js') || process.argv[1]?.endsWith('index.ts')) {
-  main().catch((err) => {
-    console.error('Fatal error starting bot:', err);
-    process.exit(1);
-  });
-}
+main().catch((err) => {
+  console.error('Fatal error starting bot:', err);
+  process.exit(1);
+});
