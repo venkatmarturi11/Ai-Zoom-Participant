@@ -32,24 +32,28 @@ async function main() {
     }
 
     async function startBotLoop() {
-      try {
-        log.info('Initializing background Telegram bot listener...');
-        const bot = createBot();
-        await bot.api.deleteWebhook({ drop_pending_updates: true }).catch((err: any) => {
-          log.warn({ error: err.message }, 'Failed to delete webhook (proceeding)');
-        });
-        await setupBotCommands(bot).catch((err: any) => {
-          log.warn({ error: err.message }, 'Failed to setup bot commands menu (proceeding)');
-        });
-        await bot.start({
-          drop_pending_updates: true,
-          onStart: (info) => {
-            log.info({ username: info.username }, '🤖 Telegram Bot is online and listening for messages!');
-          },
-        });
-      } catch (err: any) {
-        log.error({ error: err?.message || String(err) }, 'Telegram bot long-polling error, restarting in 5s...');
-        setTimeout(startBotLoop, 5000);
+      while (true) {
+        try {
+          log.info('Initializing background Telegram bot listener...');
+          const bot = createBot();
+          await bot.api.deleteWebhook({ drop_pending_updates: true }).catch((err: any) => {
+            log.warn({ error: err?.message }, 'Failed to delete webhook (proceeding)');
+          });
+          await setupBotCommands(bot).catch((err: any) => {
+            log.warn({ error: err?.message }, 'Failed to setup bot commands menu (proceeding)');
+          });
+          log.info('🤖 Starting Telegram Bot long-polling loop...');
+          await bot.start({
+            drop_pending_updates: true,
+            onStart: (info) => {
+              log.info({ username: info.username }, '🤖 Telegram Bot is online and listening for messages!');
+            },
+          });
+          log.warn('Telegram bot runner loop stopped unexpectedly, restarting in 3s...');
+        } catch (err: any) {
+          log.error({ error: err?.message || String(err) }, 'Telegram bot error, restarting in 3s...');
+        }
+        await new Promise((resolve) => setTimeout(resolve, 3000));
       }
     }
 
