@@ -77,7 +77,9 @@ export class MeetingService {
       meetingUrl: params.meetingUrl,
       passcodeEncrypted,
       displayName,
-      status: 'CREATED',
+      topic: `Zoom Meeting ${params.meetingId}`,
+      status: 'CONNECTED',
+      actualStart: new Date(),
     });
 
     // Enqueue BullMQ start job with deterministic job ID

@@ -12,6 +12,7 @@ export const meetingRepo = {
     scheduledAt?: Date;
     timezone?: string;
     status?: MeetingStatus;
+    actualStart?: Date;
   }): Promise<Meeting> {
     return getDb().meeting.create({ data });
   },

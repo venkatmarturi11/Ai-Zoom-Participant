@@ -60,21 +60,34 @@ export async function handleStopConfirm(ctx: BotContext, meetingId: string): Pro
     return;
   }
 
+  let durationStr = '00:00:00';
   try {
+    const meeting = await meetingRepo.findById(meetingId);
+    if (meeting?.actualStart) {
+      durationStr = formatDuration(Date.now() - meeting.actualStart.getTime());
+    }
+
     await meetingRepo.updateStatus(meetingId, 'STOPPING');
     await meetingRepo.updateStatus(meetingId, 'COMPLETED');
 
     await auditRepo.log({
       userId: user.id,
       action: 'MEETING_STOPPED_MANUALLY',
-      metadata: { meetingId },
+      metadata: { meetingId, duration: durationStr },
     }).catch(() => {});
   } catch {
     // DB error, continue
   }
 
   log.info({ meetingId, userId: user.id }, 'Meeting session stopped by user');
-  await ctx.editMessageText(messages.meetingStopped, { parse_mode: 'HTML' }).catch(() => {});
+
+  await ctx.editMessageText(
+    `✅ <b>Meeting Session Ended!</b>\n\n` +
+    `⏱️ <b>Attended Duration:</b> <code>${durationStr}</code>\n` +
+    `🤖 <b>Status:</b> Completed\n\n` +
+    `The assistant has left the meeting and cleaned up the session. Send another Zoom link anytime to start a new session!`,
+    { parse_mode: 'HTML' },
+  ).catch(() => {});
 }
 
 function formatDuration(ms: number): string {
