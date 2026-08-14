@@ -53,18 +53,10 @@ async function startBotSupervisor(): Promise<void> {
 async function main() {
   const server = createServer();
 
-  const port = Number(process.env['PORT'] ?? process.env['API_PORT'] ?? 3000);
+  const port = Number(process.env['PORT'] ?? process.env['API_PORT'] ?? 10000);
   const host = process.env['API_HOST'] ?? '0.0.0.0';
 
-  // Initialize PostgreSQL database schema / tables if not present
-  try {
-    log.info('Ensuring PostgreSQL database tables and enums are initialized...');
-    await initDatabaseSchema();
-    log.info('✅ PostgreSQL database schema check complete');
-  } catch (err: any) {
-    log.warn({ error: err?.message }, 'Database schema initialization warning (proceeding)');
-  }
-
+  // 1. Start HTTP Server FIRST so Render port binding and health check pass in < 1 second!
   try {
     await server.listen({ port, host });
     log.info({ port, host }, `🚀 Fastify API server listening on http://${host}:${port}`);
@@ -73,7 +65,18 @@ async function main() {
     process.exit(1);
   }
 
-  // Launch Telegram bot long-polling in background so port healthcheck resolves instantly
+  // 2. Initialize DB schema asynchronously in background
+  setImmediate(async () => {
+    try {
+      log.info('Ensuring PostgreSQL database tables and enums are initialized...');
+      await initDatabaseSchema();
+      log.info('✅ PostgreSQL database schema check complete');
+    } catch (err: any) {
+      log.warn({ error: err?.message }, 'Database schema initialization warning (proceeding)');
+    }
+  });
+
+  // 3. Launch Telegram Bot polling asynchronously in background
   setImmediate(() => {
     const botToken = process.env['TELEGRAM_BOT_TOKEN']?.trim();
     if (!botToken) {
