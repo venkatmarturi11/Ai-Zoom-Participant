@@ -1,5 +1,5 @@
 import type { BotContext } from '../bot.js';
-import { userRepo, zoomAccountRepo, meetingRepo } from '@zoom-assistant/database';
+import { userRepo, meetingRepo } from '@zoom-assistant/database';
 import { messages } from '../formatters/messages.js';
 import { activeSessionKeyboard } from '../keyboards/inline.js';
 
@@ -9,16 +9,9 @@ import { activeSessionKeyboard } from '../keyboards/inline.js';
 export async function statusCommand(ctx: BotContext): Promise<void> {
   const telegramUserId = BigInt(ctx.from!.id);
 
-  const user = await userRepo.findByTelegramId(telegramUserId);
+  let user = await userRepo.findByTelegramId(telegramUserId);
   if (!user) {
-    await ctx.reply(messages.noZoomAccount, { parse_mode: 'HTML' });
-    return;
-  }
-
-  const zoomAccount = await zoomAccountRepo.findActiveByUserId(user.id);
-  if (!zoomAccount) {
-    await ctx.reply(messages.noZoomAccount, { parse_mode: 'HTML' });
-    return;
+    user = await userRepo.upsert(telegramUserId, ctx.from?.username);
   }
 
   const activeMeetings = await meetingRepo.findActiveByUserId(user.id);
@@ -37,7 +30,7 @@ export async function statusCommand(ctx: BotContext): Promise<void> {
     messages.statusConnected({
       topic: active.topic,
       meetingId: active.zoomMeetingId,
-      email: zoomAccount.zoomEmail,
+      email: `${user.telegramUsername || user.telegramUserId}@telegram.bot`,
       duration,
       connection: active.status === 'CONNECTED' ? '🟢 Stable' : `🟡 ${active.status}`,
     }),

@@ -12,15 +12,14 @@ const log = createLogger({ module: 'stop-command' });
 export async function stopCommand(ctx: BotContext): Promise<void> {
   const telegramUserId = BigInt(ctx.from!.id);
 
-  const user = await userRepo.findByTelegramId(telegramUserId);
+  let user = await userRepo.findByTelegramId(telegramUserId);
   if (!user) {
-    await ctx.reply(messages.noZoomAccount, { parse_mode: 'HTML' });
-    return;
+    user = await userRepo.upsert(telegramUserId, ctx.from?.username);
   }
 
   const activeMeetings = await meetingRepo.findActiveByUserId(user.id);
   if (activeMeetings.length === 0) {
-    await ctx.reply('ℹ️ No active meeting session to stop.', { parse_mode: 'HTML' });
+    await ctx.reply('ℹ️ No active meeting session to stop.\n\nSend or paste any Zoom meeting link directly in chat to join a meeting!', { parse_mode: 'HTML' });
     return;
   }
 
@@ -40,25 +39,24 @@ export async function stopCommand(ctx: BotContext): Promise<void> {
  */
 export async function handleStopConfirm(ctx: BotContext, meetingId: string): Promise<void> {
   const telegramUserId = BigInt(ctx.from!.id);
-  const user = await userRepo.findByTelegramId(telegramUserId);
-  if (!user) return;
+  let user = await userRepo.findByTelegramId(telegramUserId);
+  if (!user) {
+    user = await userRepo.upsert(telegramUserId, ctx.from?.username);
+  }
 
-  // Update meeting status in DB to STOPPING / CANCELLED
+  // Update meeting status in DB to STOPPING / COMPLETED
   await meetingRepo.updateStatus(meetingId, 'STOPPING');
-
-  // TODO: Signal Redis / Worker queue to terminate the meeting worker process
-
   await meetingRepo.updateStatus(meetingId, 'COMPLETED');
 
   await auditRepo.log({
     userId: user.id,
     action: 'MEETING_STOPPED_MANUALLY',
     metadata: { meetingId },
-  });
+  }).catch(() => {});
 
   log.info({ meetingId, userId: user.id }, 'Meeting session stopped by user');
 
-  await ctx.editMessageText(messages.meetingStopped, { parse_mode: 'HTML' });
+  await ctx.editMessageText(messages.meetingStopped, { parse_mode: 'HTML' }).catch(() => {});
 }
 
 function formatDuration(ms: number): string {
