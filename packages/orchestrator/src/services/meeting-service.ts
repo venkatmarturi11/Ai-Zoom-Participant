@@ -89,6 +89,9 @@ export class MeetingService {
       zoomMeetingId: params.meetingId,
       requestedAt: new Date().toISOString(),
       mode: params.mode,
+    }).catch((err) => {
+      log.warn({ error: err?.message }, 'BullMQ enqueue skipped (continuing in-memory/DB)');
+      return `job-${meeting.id}`;
     });
 
     await auditRepo.log({
@@ -193,6 +196,8 @@ export class MeetingService {
       zoomMeetingId: meeting.zoomMeetingId,
       requestedAt: new Date().toISOString(),
       reason,
+    }).catch((err) => {
+      log.warn({ error: err?.message }, 'BullMQ stop job enqueue skipped');
     });
 
     await auditRepo.log({
