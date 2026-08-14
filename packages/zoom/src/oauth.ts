@@ -58,8 +58,8 @@ export async function exchangeCodeForTokens(
 
   if (!response.ok) {
     const errorBody = await response.text();
-    log.error({ status: response.status, body: errorBody }, 'OAuth token exchange failed');
-    throw new ZoomError(ZoomErrorCode.SDK_AUTH_FAILED, 'Failed to exchange authorization code');
+    log.error({ status: response.status, body: errorBody, clientId, redirectUri }, 'OAuth token exchange failed');
+    throw new ZoomError(ZoomErrorCode.SDK_AUTH_FAILED, `Zoom OAuth API (${response.status}): ${errorBody}`);
   }
 
   return (await response.json()) as OAuthTokenResponse;

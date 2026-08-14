@@ -174,7 +174,7 @@ export const oauthRoutes: FastifyPluginAsync = async (fastify) => {
     } catch (err: any) {
       const errMsg = err?.message || String(err);
       log.error({ error: errMsg }, 'OAuth callback handler error');
-      return reply.type('text/html').send(`
+      return reply.status(200).type('text/html').send(`
         <!DOCTYPE html>
         <html>
         <head>
