@@ -3,6 +3,9 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
+# Set dummy DATABASE_URL for Prisma Client generation during build stage
+ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder"
+
 # Copy root configuration and package files
 COPY package*.json tsconfig.base.json ./
 
@@ -12,7 +15,6 @@ COPY apps ./apps
 
 # Install all dependencies including devDependencies for tsc build
 RUN npm install
-
 
 # Generate Prisma Client & compile TypeScript workspace binaries
 RUN npm run db:generate

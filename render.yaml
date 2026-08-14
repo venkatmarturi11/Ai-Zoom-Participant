@@ -15,7 +15,7 @@ services:
   # 1. Fastify API & OAuth Web Service
   - type: web
     name: Ai-Zoom-Participant
-    runtime: node
+    env: node
     region: singapore
     plan: free
     buildCommand: npm install && npm run db:generate && npm run build
@@ -64,7 +64,7 @@ services:
   # 2. Telegram Bot Polling/Webhook Daemon
   - type: worker
     name: Ai-Zoom-Participant-Bot
-    runtime: node
+    env: node
     region: singapore
     plan: starter
     buildCommand: npm install && npm run db:generate && npm run build
@@ -74,7 +74,7 @@ services:
   # 3. Zoom Meeting Worker Daemon
   - type: worker
     name: Ai-Zoom-Participant-Worker
-    runtime: node
+    env: node
     region: singapore
     plan: starter
     buildCommand: npm install && npm run db:generate && npm run build
@@ -84,7 +84,7 @@ services:
   # 4. BullMQ Scheduler & Server Recovery Daemon
   - type: worker
     name: Ai-Zoom-Participant-Scheduler
-    runtime: node
+    env: node
     region: singapore
     plan: starter
     buildCommand: npm install && npm run db:generate && npm run build
