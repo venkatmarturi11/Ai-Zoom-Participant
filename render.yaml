@@ -18,7 +18,7 @@ services:
     env: node
     region: singapore
     plan: free
-    buildCommand: npm install && npm run db:generate && npm run build
+    buildCommand: npm install && npm run db:generate && (npm run db:push || true) && npm run build
     startCommand: node apps/api/dist/index.js
     envVars: &sharedEnv
       - key: NODE_ENV
@@ -67,7 +67,7 @@ services:
     env: node
     region: singapore
     plan: starter
-    buildCommand: npm install && npm run db:generate && npm run build
+    buildCommand: npm install && npm run db:generate && (npm run db:push || true) && npm run build
     startCommand: node apps/telegram-bot/dist/index.js
     envVars: *sharedEnv
 
@@ -77,7 +77,7 @@ services:
     env: node
     region: singapore
     plan: starter
-    buildCommand: npm install && npm run db:generate && npm run build
+    buildCommand: npm install && npm run db:generate && (npm run db:push || true) && npm run build
     startCommand: node apps/worker/dist/index.js
     envVars: *sharedEnv
 
@@ -87,6 +87,6 @@ services:
     env: node
     region: singapore
     plan: starter
-    buildCommand: npm install && npm run db:generate && npm run build
+    buildCommand: npm install && npm run db:generate && (npm run db:push || true) && npm run build
     startCommand: node apps/scheduler/dist/index.js
     envVars: *sharedEnv

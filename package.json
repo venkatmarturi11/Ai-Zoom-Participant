@@ -20,6 +20,7 @@
     "test:harness": "tsx apps/worker/src/poc/run-phase6-harness.ts",
     "lint": "npm run lint --workspaces --if-present",
     "db:generate": "npm run generate --workspace=packages/database",
+    "db:push": "npm run push --workspace=packages/database",
     "db:migrate": "npm run migrate --workspace=packages/database",
     "db:studio": "npm run studio --workspace=packages/database",
     "docker:dev": "docker compose -f docker-compose.dev.yml up -d",
