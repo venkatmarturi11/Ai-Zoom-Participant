@@ -9,48 +9,40 @@ import { createLogger } from '@zoom-assistant/shared';
 
 const log = createLogger({ module: 'api-entry' });
 
-async function startBotWithRetry(botToken: string): Promise<void> {
-  try {
-    log.info('Initializing Telegram bot listener in Web Service process...');
-    const bot = createBot();
+async function startBotSupervisor(): Promise<void> {
+  const bot = createBot();
 
-    await bot.api.deleteWebhook({ drop_pending_updates: true }).catch((err: any) => {
-      log.warn({ error: err?.message }, 'Failed to delete webhook (proceeding)');
-    });
+  await bot.api.deleteWebhook({ drop_pending_updates: true }).catch((err: any) => {
+    log.warn({ error: err?.message }, 'Failed to delete webhook (proceeding)');
+  });
 
-    await setupBotCommands(bot).catch((err: any) => {
-      log.warn({ error: err?.message }, 'Failed to setup bot commands menu (proceeding)');
-    });
+  await setupBotCommands(bot).catch((err: any) => {
+    log.warn({ error: err?.message }, 'Failed to setup bot commands menu (proceeding)');
+  });
 
-    notificationService.start(bot);
+  notificationService.start(bot);
 
-    log.info('🤖 Starting Telegram Bot long-polling runner...');
+  bot.catch(async (err) => {
+    const errorMsg = err.error instanceof Error ? err.error.message : String(err.error);
+    log.error({ error: errorMsg }, 'Grammy bot error caught');
+  });
 
-    bot.catch(async (err) => {
-      const errorMsg = err.error instanceof Error ? err.error.message : String(err.error);
-      log.error({ error: errorMsg }, 'Grammy runner error caught');
+  log.info('🤖 Launching Telegram Bot supervisor loop...');
 
-      if (errorMsg.includes('409') || errorMsg.includes('Conflict')) {
-        log.warn('409 Conflict detected during deploy overlap. Retrying bot listener in 10s...');
-        bot.stop().catch(() => {});
-        setTimeout(() => startBotWithRetry(botToken), 10000);
-      }
-    });
-
-    await bot.start({
-      drop_pending_updates: true,
-      allowed_updates: ['message', 'callback_query'],
-      onStart: (info) => {
-        log.info({ username: info.username }, '🤖 Telegram Bot is online and listening for messages!');
-      },
-    });
-  } catch (err: any) {
-    const msg = err?.message || String(err);
-    log.error({ error: msg }, 'Bot runner exception encountered');
-    if (msg.includes('409') || msg.includes('Conflict')) {
-      log.warn('409 Conflict on startup. Retrying in 10s...');
-      setTimeout(() => startBotWithRetry(botToken), 10000);
+  while (true) {
+    try {
+      await bot.start({
+        drop_pending_updates: false,
+        onStart: (info) => {
+          log.info({ username: info.username }, '🤖 Telegram Bot is online and listening for messages!');
+        },
+      });
+      log.warn('Bot polling cycle ended. Restarting in 5s...');
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      log.error({ error: msg }, 'Bot runner exception encountered, restarting in 5s...');
     }
+    await new Promise((resolve) => setTimeout(resolve, 5000));
   }
 }
 
@@ -76,7 +68,7 @@ async function main() {
       return;
     }
 
-    startBotWithRetry(botToken);
+    startBotSupervisor();
   });
 }
 
