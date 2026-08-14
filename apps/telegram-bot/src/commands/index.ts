@@ -11,7 +11,11 @@ import { meetingsCommand } from './meetings.js';
 import { statusCommand } from './status.js';
 import { stopCommand, handleStopConfirm } from './stop.js';
 import { settingsCommand } from './settings.js';
+import { pauseCommand, resumeCommand } from './pause-resume.js';
 import { userRepo } from '@zoom-assistant/database';
+import { createLogger } from '@zoom-assistant/shared';
+
+const log = createLogger({ module: 'bot-commands' });
 
 export function registerCommands(bot: Bot<BotContext>): void {
   // Middleware to ensure user record exists on any command interaction
@@ -33,6 +37,8 @@ export function registerCommands(bot: Bot<BotContext>): void {
   bot.command('meetings', meetingsCommand);
   bot.command('status', statusCommand);
   bot.command('stop', stopCommand);
+  bot.command('pause', pauseCommand);
+  bot.command('resume', resumeCommand);
   bot.command('settings', settingsCommand);
 
   // Handle multi-step conversation inputs
@@ -99,4 +105,32 @@ export function registerCommands(bot: Bot<BotContext>): void {
 
     await next();
   });
+}
+
+/**
+ * Registers bot slash commands with Telegram API so the autocomplete popup menu
+ * and Telegram "Menu" button display all available bot commands in the chat interface.
+ */
+export async function setupBotCommands(bot: Bot<BotContext>): Promise<void> {
+  try {
+    await bot.api.setMyCommands([
+      { command: 'start', description: 'Start conversation & register' },
+      { command: 'join', description: 'Join a Zoom meeting immediately' },
+      { command: 'schedule', description: 'Schedule a meeting join time' },
+      { command: 'status', description: 'Current meeting session status' },
+      { command: 'stop', description: 'Stop active meeting session' },
+      { command: 'meetings', description: 'List active & recent meetings' },
+      { command: 'account', description: 'View connected Zoom account' },
+      { command: 'connect_zoom', description: 'Connect Zoom OAuth account' },
+      { command: 'disconnect_zoom', description: 'Disconnect Zoom account' },
+      { command: 'pause', description: 'Pause meeting notifications' },
+      { command: 'resume', description: 'Resume meeting notifications' },
+      { command: 'settings', description: 'Bot configuration & defaults' },
+      { command: 'help', description: 'Get help & documentation' },
+    ]);
+    log.info('Registered Telegram bot commands menu');
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    log.error({ error: message }, 'Failed to set Telegram bot commands menu');
+  }
 }

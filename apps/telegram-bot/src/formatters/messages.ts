@@ -10,6 +10,10 @@ I can control your Zoom meetings directly from Telegram.
 <b>Get started:</b>
 Connect your Zoom account to begin.`,
 
+  pause: `⏸️ <b>Notifications paused.</b>\n\nUse /resume to resume receiving meeting alerts.`,
+
+  resume: `▶️ <b>Notifications resumed.</b>\n\nYou will receive active meeting alerts and updates.`,
+
   help: `📋 <b>Available Commands</b>
 
 <b>Account</b>
@@ -25,6 +29,8 @@ Connect your Zoom account to begin.`,
 <b>Session</b>
 /status — Current session status
 /stop — Stop active meeting session
+/pause — Pause notifications
+/resume — Resume notifications
 /settings — Bot settings
 
 <b>Other</b>

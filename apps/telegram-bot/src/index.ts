@@ -1,7 +1,7 @@
 import { createBot } from './bot.js';
+import { setupBotCommands } from './commands/index.js';
 import { notificationService } from './services/notification-service.js';
 import { createLogger } from '@zoom-assistant/shared';
-
 
 const log = createLogger({ module: 'telegram-bot' });
 
@@ -9,6 +9,10 @@ async function main() {
   log.info('Starting Telegram Zoom Assistant bot...');
 
   const bot = createBot();
+
+  // Register commands popup menu in Telegram UI
+  await setupBotCommands(bot);
+
   notificationService.start(bot);
 
   // Graceful shutdown
@@ -19,7 +23,6 @@ async function main() {
     process.exit(0);
   };
 
-
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
 
@@ -29,7 +32,7 @@ async function main() {
     log.info('Starting bot in polling mode (development)');
     bot.start({
       onStart: (info) => {
-        log.info({ username: info.username }, '🤖 Bot is running');
+        log.info({ username: info.username }, '🤖 Bot is running with Telegram Menu commands configured');
       },
     });
   } else {
