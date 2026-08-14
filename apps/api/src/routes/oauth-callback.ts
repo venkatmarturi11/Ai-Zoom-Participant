@@ -107,7 +107,7 @@ export const oauthRoutes: FastifyPluginAsync = async (fastify) => {
       const clientSecret = process.env['ZOOM_CLIENT_SECRET'] ?? '';
       const redirectUri =
         process.env['ZOOM_REDIRECT_URI'] ?? 'https://ai-zoom-participant.onrender.com/auth/zoom/callback';
-      const encryptionKey = process.env['ENCRYPTION_KEY'] ?? 'fallback_secret_key_32bytes_long!';
+      const encryptionKey = process.env['ENCRYPTION_KEY'] ?? '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 
       // Exchange code for tokens
       const tokenResp = await exchangeCodeForTokens(
