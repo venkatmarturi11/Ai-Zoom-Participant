@@ -1,6 +1,3 @@
-import { createBot } from './bot.js';
-import { setupBotCommands } from './commands/index.js';
-import { notificationService } from './services/notification-service.js';
 import { createLogger } from '@zoom-assistant/shared';
 
 export { createBot, type BotContext } from './bot.js';
@@ -9,44 +6,25 @@ export { notificationService } from './services/notification-service.js';
 
 const log = createLogger({ module: 'telegram-bot' });
 
+/**
+ * Standalone entry point — NOT USED when bot is embedded in the API server.
+ * The bot long-polling runner is embedded in apps/api/src/index.ts to avoid
+ * 409 Conflict errors from multiple services polling the same bot token.
+ *
+ * If this file is executed directly, it simply exits.
+ */
 async function main() {
-  log.info('Starting Telegram Zoom Assistant bot...');
+  log.info('⚠️  Telegram bot standalone mode is DISABLED.');
+  log.info('The bot is embedded in the API server (apps/api/src/index.ts).');
+  log.info('This worker process will now exit. Remove the Ai-Zoom-Participant-Bot worker from Render.');
 
-  const bot = createBot();
-
-  // Clear any existing webhook so long polling receives all updates cleanly
-  try {
-    await bot.api.deleteWebhook({ drop_pending_updates: false });
-    log.info('Successfully cleared stale Telegram webhooks');
-  } catch (err: any) {
-    log.warn({ error: err.message }, 'Failed to clear webhook (proceeding to long polling)');
-  }
-
-  // Register commands popup menu in Telegram UI
-  await setupBotCommands(bot);
-
-  notificationService.start(bot);
-
-  // Graceful shutdown
-  const shutdown = async (signal: string) => {
-    log.info({ signal }, 'Shutdown signal received');
-    notificationService.stop();
-    bot.stop();
-    process.exit(0);
-  };
-
-  process.on('SIGINT', () => shutdown('SIGINT'));
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-
-  log.info('Starting bot long-polling runner...');
-  bot.start({
-    onStart: (info) => {
-      log.info({ username: info.username }, '🤖 Bot is running and listening for Telegram commands');
-    },
-  });
+  // Keep process alive so Render doesn't restart it in a crash loop
+  // But do NOT start any bot polling
+  setInterval(() => {
+    log.info('Bot worker idle — bot runs inside API server');
+  }, 300_000); // log every 5 minutes
 }
 
 main().catch((err) => {
-  console.error('Fatal error starting bot:', err);
-  process.exit(1);
+  console.error('Fatal error:', err);
 });

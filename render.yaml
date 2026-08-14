@@ -12,7 +12,9 @@ services:
     ipAllowList: []
     maxmemoryPolicy: noeviction
 
-  # 1. Fastify API & OAuth Web Service
+  # 1. Fastify API + OAuth + Telegram Bot (ALL-IN-ONE)
+  #    The Telegram bot long-polling runner is embedded inside the API server
+  #    to avoid 409 Conflict errors from multiple services polling the same token.
   - type: web
     name: Ai-Zoom-Participant
     env: node
@@ -54,6 +56,8 @@ services:
         sync: false
       - key: ZOOM_SDK_SECRET
         sync: false
+      - key: ZOOM_ACCOUNT_ID
+        sync: false
       - key: ENCRYPTION_KEY
         sync: false
       - key: DEFAULT_DISPLAY_NAME
@@ -61,15 +65,9 @@ services:
       - key: DEFAULT_TIMEZONE
         value: Asia/Kolkata
 
-  # 2. Telegram Bot Polling/Webhook Daemon
-  - type: worker
-    name: Ai-Zoom-Participant-Bot
-    env: node
-    region: singapore
-    plan: free
-    buildCommand: npm install && npm run db:generate && (npm run db:push || true) && npm run build
-    startCommand: node apps/telegram-bot/dist/index.js
-    envVars: *sharedEnv
+  # NOTE: The separate Telegram Bot worker has been REMOVED.
+  # Bot polling is now embedded in the API service above to prevent
+  # 409 Conflict errors from two services polling the same bot token.
 
   # 3. Zoom Meeting Worker Daemon
   - type: worker
