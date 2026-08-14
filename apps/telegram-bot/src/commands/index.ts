@@ -21,7 +21,11 @@ export function registerCommands(bot: Bot<BotContext>): void {
   // Middleware to ensure user record exists on any command interaction
   bot.use(async (ctx, next) => {
     if (ctx.from) {
-      await userRepo.upsert(BigInt(ctx.from.id), ctx.from.username);
+      try {
+        await userRepo.upsert(BigInt(ctx.from.id), ctx.from.username);
+      } catch (err: any) {
+        log.error({ error: err.message }, 'Failed to upsert user record during command (continuing command execution)');
+      }
     }
     await next();
   });
