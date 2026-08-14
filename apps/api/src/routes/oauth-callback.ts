@@ -24,6 +24,13 @@ export const oauthRoutes: FastifyPluginAsync = async (fastify) => {
    *   2. Redirects user to Zoom's authorization page
    */
   fastify.get('/zoom/connect', async (request, reply) => {
+    return handleConnect(request, reply);
+  });
+  fastify.get('/auth/zoom/connect', async (request, reply) => {
+    return handleConnect(request, reply);
+  });
+
+  async function handleConnect(request: any, reply: any) {
     const query = request.query as { telegram_user_id?: string };
     const telegramUserIdStr = query.telegram_user_id;
 
@@ -43,21 +50,16 @@ export const oauthRoutes: FastifyPluginAsync = async (fastify) => {
     log.info({ telegramUserId: telegramUserIdStr }, 'Initiating Zoom OAuth redirect');
 
     return reply.redirect(authUrl);
+  }
+
+  fastify.get('/zoom/callback', async (request, reply) => {
+    return handleCallback(request, reply);
+  });
+  fastify.get('/auth/zoom/callback', async (request, reply) => {
+    return handleCallback(request, reply);
   });
 
-  /**
-   * GET /zoom/callback?code=...&state=...
-   *
-   * Handles Zoom OAuth callback:
-   *   1. Validates and consumes one-time CSRF state (prevents replay/CSRF)
-   *   2. Exchanges authorization code for access + refresh tokens
-   *   3. Fetches Zoom user profile (email, Zoom ID)
-   *   4. Encrypts tokens with AES-256-GCM
-   *   5. Stores in PostgreSQL zoom_accounts table
-   *   6. Logs audit event
-   *   7. Renders success page
-   */
-  fastify.get('/zoom/callback', async (request, reply) => {
+  async function handleCallback(request: any, reply: any) {
     const query = request.query as { code?: string; state?: string; error?: string };
 
     if (query.error) {
@@ -158,5 +160,5 @@ export const oauthRoutes: FastifyPluginAsync = async (fastify) => {
       log.error({ error: err }, 'OAuth callback handler error');
       return reply.status(500).send('Failed to complete Zoom authorization. Please try again.');
     }
-  });
+  }
 };
