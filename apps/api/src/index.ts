@@ -11,27 +11,23 @@ import { createLogger } from '@zoom-assistant/shared';
 const log = createLogger({ module: 'api-entry' });
 
 async function startBotSupervisor(): Promise<void> {
-  const bot = createBot();
-
-  await bot.api.deleteWebhook({ drop_pending_updates: true }).catch((err: any) => {
-    log.warn({ error: err?.message }, 'Failed to delete webhook (proceeding)');
-  });
-
-  await setupBotCommands(bot).catch((err: any) => {
-    log.warn({ error: err?.message }, 'Failed to setup bot commands menu (proceeding)');
-  });
-
-  notificationService.start(bot);
-
-  bot.catch(async (err) => {
-    const errorMsg = err.error instanceof Error ? err.error.message : String(err.error);
-    log.error({ error: errorMsg }, 'Grammy bot error caught');
-  });
-
   log.info('🤖 Launching Telegram Bot supervisor loop...');
 
   while (true) {
+    let bot;
     try {
+      bot = createBot();
+
+      await bot.api.deleteWebhook({ drop_pending_updates: false }).catch((err: any) => {
+        log.warn({ error: err?.message }, 'Failed to delete webhook (proceeding)');
+      });
+
+      await setupBotCommands(bot).catch((err: any) => {
+        log.warn({ error: err?.message }, 'Failed to setup bot commands menu (proceeding)');
+      });
+
+      notificationService.start(bot);
+
       await bot.start({
         drop_pending_updates: false,
         onStart: (info) => {
@@ -42,6 +38,13 @@ async function startBotSupervisor(): Promise<void> {
     } catch (err: any) {
       const msg = err?.message || String(err);
       log.error({ error: msg }, 'Bot runner exception encountered, restarting in 5s...');
+      if (bot) {
+        try {
+          bot.stop();
+        } catch {
+          // ignore
+        }
+      }
     }
     await new Promise((resolve) => setTimeout(resolve, 5000));
   }
