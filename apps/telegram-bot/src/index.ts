@@ -13,6 +13,14 @@ async function main() {
 
   const bot = createBot();
 
+  // Clear any existing webhook so long polling receives all updates cleanly
+  try {
+    await bot.api.deleteWebhook({ drop_pending_updates: false });
+    log.info('Successfully cleared stale Telegram webhooks');
+  } catch (err: any) {
+    log.warn({ error: err.message }, 'Failed to clear webhook (proceeding to long polling)');
+  }
+
   // Register commands popup menu in Telegram UI
   await setupBotCommands(bot);
 

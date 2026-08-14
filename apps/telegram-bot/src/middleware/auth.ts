@@ -21,6 +21,8 @@ export async function authMiddleware(ctx: BotContext, next: NextFunction): Promi
     return;
   }
 
+  log.info({ userId, text: ctx.message?.text }, 'Received update from Telegram user');
+
   const authorizedIds = process.env['AUTHORIZED_TELEGRAM_IDS'];
   if (!authorizedIds) {
     log.fatal('AUTHORIZED_TELEGRAM_IDS is not configured');
