@@ -3,6 +3,9 @@ import { setupBotCommands } from './commands/index.js';
 import { notificationService } from './services/notification-service.js';
 import { createLogger } from '@zoom-assistant/shared';
 
+export { createBot, type BotContext } from './bot.js';
+export { setupBotCommands } from './commands/index.js';
+
 const log = createLogger({ module: 'telegram-bot' });
 
 async function main() {
@@ -40,7 +43,10 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error('Fatal error starting bot:', err);
-  process.exit(1);
-});
+// Only auto-start main() when run directly as CLI script
+if (process.argv[1]?.endsWith('index.js') || process.argv[1]?.endsWith('index.ts')) {
+  main().catch((err) => {
+    console.error('Fatal error starting bot:', err);
+    process.exit(1);
+  });
+}

@@ -17,7 +17,8 @@
     "@zoom-assistant/database": "*",
     "@zoom-assistant/crypto": "*",
     "@zoom-assistant/zoom": "*",
-    "@zoom-assistant/orchestrator": "*"
+    "@zoom-assistant/orchestrator": "*",
+    "@zoom-assistant/telegram-bot": "*"
   },
   "devDependencies": {
     "tsx": "^4.16.0"
