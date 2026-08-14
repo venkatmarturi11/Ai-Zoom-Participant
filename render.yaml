@@ -66,7 +66,7 @@ services:
     name: Ai-Zoom-Participant-Bot
     env: node
     region: singapore
-    plan: starter
+    plan: free
     buildCommand: npm install && npm run db:generate && (npm run db:push || true) && npm run build
     startCommand: node apps/telegram-bot/dist/index.js
     envVars: *sharedEnv
@@ -76,7 +76,7 @@ services:
     name: Ai-Zoom-Participant-Worker
     env: node
     region: singapore
-    plan: starter
+    plan: free
     buildCommand: npm install && npm run db:generate && (npm run db:push || true) && npm run build
     startCommand: node apps/worker/dist/index.js
     envVars: *sharedEnv
@@ -86,7 +86,7 @@ services:
     name: Ai-Zoom-Participant-Scheduler
     env: node
     region: singapore
-    plan: starter
+    plan: free
     buildCommand: npm install && npm run db:generate && (npm run db:push || true) && npm run build
     startCommand: node apps/scheduler/dist/index.js
     envVars: *sharedEnv
