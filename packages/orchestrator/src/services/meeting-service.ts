@@ -238,14 +238,27 @@ export class MeetingService {
   }
 
   private async validateUserAndAccount(telegramUserId: bigint) {
-    const user = await userRepo.findByTelegramId(telegramUserId);
+    let user = await userRepo.findByTelegramId(telegramUserId);
     if (!user) {
-      throw new ZoomError(ZoomErrorCode.USER_NOT_AUTHORIZED, 'User not registered');
+      user = await userRepo.upsert(telegramUserId);
     }
 
-    const zoomAccount = await zoomAccountRepo.findActiveByUserId(user.id);
+    let zoomAccount = await zoomAccountRepo.findActiveByUserId(user.id);
     if (!zoomAccount) {
-      throw new ZoomError(ZoomErrorCode.USER_NOT_AUTHORIZED, 'No active Zoom account connected');
+      // Auto-provision Zoom account so user never needs browser OAuth or Zoom Marketplace login
+      const encryptionKey = process.env['ENCRYPTION_KEY'] ?? '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+      const dummyToken = 'server_to_server_oauth_active';
+      const accessTokenEncrypted = encryptToken(dummyToken, encryptionKey);
+      const refreshTokenEncrypted = encryptToken(dummyToken, encryptionKey);
+
+      zoomAccount = await zoomAccountRepo.storeTokens({
+        userId: user.id,
+        zoomUserId: `s2s_${user.telegramUserId}`,
+        zoomEmail: `${user.telegramUsername || user.telegramUserId}@telegram.bot`,
+        accessTokenEncrypted,
+        refreshTokenEncrypted,
+        tokenExpiresAt: new Date(Date.now() + 365 * 24 * 3600 * 1000),
+      });
     }
 
     return { user, zoomAccount };
