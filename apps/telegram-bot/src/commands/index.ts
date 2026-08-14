@@ -13,13 +13,14 @@ import { stopCommand, handleStopConfirm } from './stop.js';
 import { settingsCommand } from './settings.js';
 import { pauseCommand, resumeCommand } from './pause-resume.js';
 import { userRepo } from '@zoom-assistant/database';
+import { extractZoomUrl } from '@zoom-assistant/meeting-parser';
 import { createLogger } from '@zoom-assistant/shared';
 
 const log = createLogger({ module: 'bot-commands' });
 
 export function registerCommands(bot: Bot<BotContext>): void {
   // Middleware to ensure user record exists on any command interaction
-  // This is completely non-blocking — if DB is down, commands still work
+  // Non-blocking so DB errors never hang commands
   bot.use(async (ctx, next) => {
     if (ctx.from) {
       userRepo.upsert(BigInt(ctx.from.id), ctx.from.username).catch((err: any) => {
@@ -28,7 +29,6 @@ export function registerCommands(bot: Bot<BotContext>): void {
     }
     await next();
   });
-
 
   // Register command handlers
   bot.command('start', startCommand);
@@ -45,7 +45,7 @@ export function registerCommands(bot: Bot<BotContext>): void {
   bot.command('resume', resumeCommand);
   bot.command('settings', settingsCommand);
 
-  // Handle multi-step conversation inputs
+  // Handle multi-step conversation inputs & direct Zoom links
   bot.on('message:text', async (ctx, next) => {
     // If command, skip to next middleware (handled by bot.command above)
     if (ctx.message.text.startsWith('/')) {
@@ -69,7 +69,16 @@ export function registerCommands(bot: Bot<BotContext>): void {
       return;
     }
 
-    await next();
+    // Direct Zoom meeting link pasted anytime!
+    if (ctx.message.text.includes('zoom.us') || extractZoomUrl(ctx.message.text)) {
+      await handleMeetingLinkInput(ctx);
+      return;
+    }
+
+    await ctx.reply(
+      '💡 Send <code>/help</code> to see available commands or paste any Zoom meeting link directly to join!',
+      { parse_mode: 'HTML' },
+    );
   });
 
   // Handle callback queries

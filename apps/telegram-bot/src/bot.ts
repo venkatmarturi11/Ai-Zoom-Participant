@@ -43,30 +43,14 @@ export function createBot(): Bot<BotContext> {
   // Authorization middleware — rejects unauthorized Telegram users
   bot.use(authMiddleware);
 
-  // Register all command handlers
+  // Register all command handlers & message routing
   registerCommands(bot);
-
-  // Handle text messages (for multi-step conversations)
-  bot.on('message:text', async (ctx) => {
-    const { step } = ctx.session;
-
-    if (step === 'idle') {
-      await ctx.reply(
-        '💡 Use /help to see available commands.',
-        { parse_mode: 'HTML' },
-      );
-      return;
-    }
-
-    // Delegate to the appropriate handler based on conversation state
-    // These are imported and handled in the command modules via callbacks
-  });
 
   // Handle callback queries (inline keyboard button presses)
   bot.on('callback_query:data', async (ctx) => {
     const data = ctx.callbackQuery.data;
     log.debug({ data, userId: ctx.from.id }, 'Callback query received');
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => {});
   });
 
   // Global robust Error handler to keep bot polling 24/7

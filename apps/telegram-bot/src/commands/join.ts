@@ -2,7 +2,7 @@ import type { BotContext } from '../bot.js';
 import { messages } from '../formatters/messages.js';
 import { meetingActionsKeyboard, activeSessionKeyboard } from '../keyboards/inline.js';
 import { parseMeetingUrl, extractZoomUrl } from '@zoom-assistant/meeting-parser';
-import { userRepo, zoomAccountRepo, meetingRepo } from '@zoom-assistant/database';
+import { userRepo, meetingRepo } from '@zoom-assistant/database';
 import { meetingService } from '@zoom-assistant/orchestrator';
 import { createLogger } from '@zoom-assistant/shared';
 
@@ -10,46 +10,33 @@ const log = createLogger({ module: 'join-command' });
 
 /**
  * /join — Start the meeting join flow
- *
- * Flow:
- *   1. Check Zoom account is connected
- *   2. Check no duplicate active session
- *   3. Prompt for meeting link
- *   4. Parse and validate
- *   5. Show meeting info + action buttons
  */
 export async function joinCommand(ctx: BotContext): Promise<void> {
   const telegramUserId = BigInt(ctx.from!.id);
 
-  // Check Zoom account
-  const user = await userRepo.findByTelegramId(telegramUserId);
+  let user = await userRepo.findByTelegramId(telegramUserId).catch(() => null);
   if (!user) {
-    await ctx.reply(messages.noZoomAccount, { parse_mode: 'HTML' });
-    return;
-  }
-
-  const zoomAccount = await zoomAccountRepo.findActiveByUserId(user.id);
-  if (!zoomAccount) {
-    await ctx.reply(messages.noZoomAccount, { parse_mode: 'HTML' });
-    return;
+    user = await userRepo.upsert(telegramUserId, ctx.from?.username).catch(() => null);
   }
 
   // Check for existing active session (duplicate prevention)
-  const activeMeetings = await meetingRepo.findActiveByUserId(user.id);
-  if (activeMeetings.length > 0) {
-    const active = activeMeetings[0]!;
-    const duration = active.actualStart
-      ? formatDuration(Date.now() - active.actualStart.getTime())
-      : '00:00:00';
+  if (user) {
+    const activeMeetings = await meetingRepo.findActiveByUserId(user.id).catch(() => []);
+    if (activeMeetings.length > 0) {
+      const active = activeMeetings[0]!;
+      const duration = active.actualStart
+        ? formatDuration(Date.now() - active.actualStart.getTime())
+        : '00:00:00';
 
-    await ctx.reply(
-      messages.duplicateSession(active.topic, duration),
-      {
-        parse_mode: 'HTML',
-        reply_markup: activeSessionKeyboard(active.id),
-      },
-    );
-    return;
+      await ctx.reply(
+        messages.duplicateSession(active.topic, duration),
+        {
+          parse_mode: 'HTML',
+          reply_markup: activeSessionKeyboard(active.id),
+        },
+      );
+      return;
+    }
   }
 
   // Set conversation state to await meeting link
@@ -58,7 +45,7 @@ export async function joinCommand(ctx: BotContext): Promise<void> {
 }
 
 /**
- * Handle text input when awaiting a meeting link.
+ * Handle text input when a meeting link is received.
  */
 export async function handleMeetingLinkInput(ctx: BotContext): Promise<void> {
   const text = ctx.message?.text;
@@ -77,20 +64,9 @@ export async function handleMeetingLinkInput(ctx: BotContext): Promise<void> {
   const { meeting } = result;
   const telegramUserId = BigInt(ctx.from!.id);
 
-  // Fetch user + zoom account
-  const user = await userRepo.findByTelegramId(telegramUserId);
-  if (!user) return;
-
-  const zoomAccount = await zoomAccountRepo.findActiveByUserId(user.id);
-  if (!zoomAccount) {
-    ctx.session.step = 'idle';
-    await ctx.reply(messages.noZoomAccount, { parse_mode: 'HTML' });
-    return;
-  }
-
-  // If this is a vanity URL, we note it but still proceed
-  if (meeting.isVanityUrl) {
-    log.info({ vanityName: meeting.meetingId }, 'Vanity URL received');
+  let user = await userRepo.findByTelegramId(telegramUserId).catch(() => null);
+  if (!user) {
+    user = await userRepo.upsert(telegramUserId, ctx.from?.username).catch(() => null);
   }
 
   // If no passcode in URL, ask for it
@@ -109,7 +85,7 @@ export async function handleMeetingLinkInput(ctx: BotContext): Promise<void> {
   try {
     const userDisplayName = [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(' ') || ctx.from?.username || undefined;
 
-    const result = await meetingService.createAndQueueMeeting({
+    const res = await meetingService.createAndQueueMeeting({
       telegramUserId,
       meetingUrl: meeting.originalUrl,
       meetingId: meeting.meetingId,
@@ -118,15 +94,19 @@ export async function handleMeetingLinkInput(ctx: BotContext): Promise<void> {
     });
 
     log.info(
-      { meetingId: meeting.meetingId, userId: user.id, recordId: result.meeting.id, capability: result.capability.capability },
+      { meetingId: meeting.meetingId, userId: user?.id, recordId: res.meeting.id, capability: res.capability.capability },
       'Meeting created and queued via MeetingService',
     );
 
     await ctx.reply(
-      `🔎 <b>Meeting detected</b>\n\nMeeting ID: <code>${meeting.meetingId}</code>\nZoom account: <code>${zoomAccount.zoomEmail}</code>\nCapability: <code>${result.capability.capability}</code>\nStatus: 🟡 QUEUED`,
+      `🔎 <b>Meeting Detected & Queued!</b>\n\n` +
+      `📌 <b>Meeting ID:</b> <code>${meeting.meetingId}</code>\n` +
+      `👤 <b>Display Name:</b> <code>${userDisplayName ?? 'Meeting Assistant'}</code>\n` +
+      `⚡ <b>Status:</b> 🟢 <b>JOINING NOW</b>\n\n` +
+      `The assistant is connecting to your Zoom meeting!`,
       {
         parse_mode: 'HTML',
-        reply_markup: meetingActionsKeyboard(result.meeting.id),
+        reply_markup: meetingActionsKeyboard(res.meeting.id),
       },
     );
   } catch (err: any) {
@@ -134,7 +114,6 @@ export async function handleMeetingLinkInput(ctx: BotContext): Promise<void> {
     log.error({ error: err.message }, 'Error in /join handler');
     await ctx.reply(`⚠️ ${err.message}`, { parse_mode: 'HTML' });
   }
-
 }
 
 /**
@@ -145,14 +124,9 @@ export async function handlePasscodeInput(ctx: BotContext): Promise<void> {
   if (!text) return;
 
   const telegramUserId = BigInt(ctx.from!.id);
-  const user = await userRepo.findByTelegramId(telegramUserId);
-  if (!user) return;
-
-  const zoomAccount = await zoomAccountRepo.findActiveByUserId(user.id);
-  if (!zoomAccount) {
-    ctx.session.step = 'idle';
-    await ctx.reply(messages.noZoomAccount, { parse_mode: 'HTML' });
-    return;
+  let user = await userRepo.findByTelegramId(telegramUserId).catch(() => null);
+  if (!user) {
+    user = await userRepo.upsert(telegramUserId, ctx.from?.username).catch(() => null);
   }
 
   const meetingId = ctx.session.pendingMeetingId;
@@ -170,7 +144,7 @@ export async function handlePasscodeInput(ctx: BotContext): Promise<void> {
   try {
     const userDisplayName = [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(' ') || ctx.from?.username || undefined;
 
-    const result = await meetingService.createAndQueueMeeting({
+    const res = await meetingService.createAndQueueMeeting({
       telegramUserId,
       meetingUrl,
       meetingId,
@@ -179,21 +153,20 @@ export async function handlePasscodeInput(ctx: BotContext): Promise<void> {
     });
 
     await ctx.reply(
-      `🔎 <b>Meeting detected</b>\n\nMeeting ID: <code>${meetingId}</code>\nZoom account: <code>${zoomAccount.zoomEmail}</code>\nCapability: <code>${result.capability.capability}</code>\nStatus: 🟡 QUEUED`,
+      `🔎 <b>Meeting Detected & Queued!</b>\n\n` +
+      `📌 <b>Meeting ID:</b> <code>${meetingId}</code>\n` +
+      `👤 <b>Display Name:</b> <code>${userDisplayName ?? 'Meeting Assistant'}</code>\n` +
+      `⚡ <b>Status:</b> 🟢 <b>JOINING NOW</b>\n\n` +
+      `The assistant is connecting to your Zoom meeting!`,
       {
         parse_mode: 'HTML',
-        reply_markup: meetingActionsKeyboard(result.meeting.id),
+        reply_markup: meetingActionsKeyboard(res.meeting.id),
       },
     );
   } catch (err: any) {
     await ctx.reply(`⚠️ ${err.message}`, { parse_mode: 'HTML' });
   }
-
 }
-
-// ============================================================
-// Helpers
-// ============================================================
 
 function formatDuration(ms: number): string {
   const totalSeconds = Math.floor(ms / 1000);
