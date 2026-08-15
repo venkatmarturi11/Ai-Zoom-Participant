@@ -15,9 +15,14 @@ services:
   # 1. Fastify API + OAuth + Telegram Bot (ALL-IN-ONE)
   #    The Telegram bot long-polling runner is embedded inside the API server
   #    to avoid 409 Conflict errors from multiple services polling the same token.
+  #    IMPORTANT (free plan only): Render spins this service down after 15 min
+  #    of no inbound HTTP traffic. Since nothing pings this service on its own,
+  #    the bot's long-polling loop stops and never restarts on its own.
+  #    Set up a free external uptime monitor (UptimeRobot / cron-job.org) to hit
+  #    GET /health every ~10 minutes, or move this service to plan: starter.
   - type: web
     name: Ai-Zoom-Participant
-    env: node
+    runtime: node
     region: singapore
     plan: free
     buildCommand: npm install && npm run db:generate && (npm run db:push || true) && npm run build
@@ -72,9 +77,9 @@ services:
   # 3. Zoom Meeting Worker Daemon
   - type: worker
     name: Ai-Zoom-Participant-Worker
-    env: node
+    runtime: node
     region: singapore
-    plan: free
+    plan: starter
     buildCommand: npm install && npm run db:generate && (npm run db:push || true) && npm run build
     startCommand: node apps/worker/dist/index.js
     envVars: *sharedEnv
@@ -82,9 +87,9 @@ services:
   # 4. BullMQ Scheduler & Server Recovery Daemon
   - type: worker
     name: Ai-Zoom-Participant-Scheduler
-    env: node
+    runtime: node
     region: singapore
-    plan: free
+    plan: starter
     buildCommand: npm install && npm run db:generate && (npm run db:push || true) && npm run build
     startCommand: node apps/scheduler/dist/index.js
     envVars: *sharedEnv

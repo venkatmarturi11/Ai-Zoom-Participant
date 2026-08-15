@@ -76,18 +76,7 @@ async function main() {
     }
   });
 
-  // 3. Keep-alive self-ping every 10 minutes to prevent Render free instance from hibernating
-  setInterval(async () => {
-    try {
-      const selfUrl = process.env['RENDER_EXTERNAL_URL'] || `http://localhost:${port}`;
-      await fetch(`${selfUrl}/health`).catch(() => {});
-      log.debug('Sent keep-alive ping');
-    } catch {
-      // ignore
-    }
-  }, 10 * 60 * 1000);
-
-  // 4. Launch Telegram Bot polling asynchronously in background
+  // 3. Launch Telegram Bot polling asynchronously in background
   setImmediate(() => {
     const botToken = process.env['TELEGRAM_BOT_TOKEN']?.trim();
     if (!botToken) {
@@ -97,6 +86,22 @@ async function main() {
 
     startBotSupervisor();
   });
+
+  // 4. Self-ping keep-alive — Render's Free plan spins a web service down after
+  // 15 minutes with no inbound HTTP traffic. Since Telegram long-polling never
+  // sends *us* an HTTP request, nothing would ever wake this service back up on
+  // its own. Pinging our own /health endpoint every 10 minutes keeps it alive.
+  // Only runs when RENDER_EXTERNAL_URL is present (i.e. actually running on Render).
+  const externalUrl = process.env['RENDER_EXTERNAL_URL'];
+  if (externalUrl) {
+    const KEEP_ALIVE_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+    setInterval(() => {
+      fetch(`${externalUrl}/health`).catch((err: any) => {
+        log.warn({ error: err?.message }, 'Self-ping keep-alive request failed');
+      });
+    }, KEEP_ALIVE_INTERVAL_MS);
+    log.info({ externalUrl, intervalMinutes: 10 }, '💓 Self-ping keep-alive enabled to prevent free-tier spin-down');
+  }
 }
 
 main();
