@@ -33,10 +33,10 @@ export interface ParseError {
 export type MeetingParseResult = ParseResult | ParseError;
 
 /** Allowlisted Zoom hostname patterns */
-const ZOOM_HOST_PATTERN = /^([a-z0-9]+\.)?zoom\.us$/i;
+const ZOOM_HOST_PATTERN = /^([a-z0-9-]+\.)?zoom\.us$/i;
 
-/** Meeting ID path pattern: /j/{9-11 digits} */
-const MEETING_PATH_PATTERN = /^\/j\/(\d{9,11})$/;
+/** Meeting ID path pattern: /j/{id}, /w/{id}, /wc/{id}, /wc/{id}/join, /wc/{id}/start */
+const MEETING_PATH_PATTERN = /^\/(?:j|w|wc)\/(\d{9,11})(?:\/(?:join|start))?$/i;
 
 /** Vanity URL path pattern: /my/{name} */
 const VANITY_PATH_PATTERN = /^\/my\/([a-zA-Z0-9._-]+)$/;
@@ -141,7 +141,7 @@ export function isValidMeetingId(id: string): boolean {
  * Useful when users paste an entire invitation block.
  */
 export function extractZoomUrl(text: string): string | null {
-  const urlPattern = /https:\/\/[a-z0-9]+\.?zoom\.us\/[^\s]+/i;
+  const urlPattern = /https:\/\/[a-z0-9.-]*zoom\.us\/[^\s]+/i;
   const match = urlPattern.exec(text);
   return match ? match[0] : null;
 }
