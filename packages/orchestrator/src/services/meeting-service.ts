@@ -393,6 +393,19 @@ export class MeetingService {
       activeCount: entries.length,
     };
   }
+
+  /**
+   * Dispatch a remote control event (mouse/keyboard) to the active browser adapter.
+   */
+  public async dispatchControlEvent(event: any): Promise<void> {
+    const entries = Array.from(activeBrowserAdapters.values());
+    if (entries.length > 0) {
+      const adapter = entries[0];
+      if (adapter && typeof adapter.handleControlEvent === 'function') {
+        await adapter.handleControlEvent(event);
+      }
+    }
+  }
 }
 
 export const meetingService = new MeetingService();

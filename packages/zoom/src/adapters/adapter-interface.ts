@@ -2,6 +2,7 @@ export interface AdapterStatus {
   connected: boolean;
   waitingRoom: boolean;
   meetingEnded: boolean;
+  needsHumanInteraction?: boolean;
   errorCode?: string;
   details?: Record<string, unknown>;
 }
@@ -21,6 +22,9 @@ export interface MeetingAdapter {
 
   /** Connect to the meeting */
   connect(): Promise<void>;
+
+  /** Handle remote human-in-the-loop control events */
+  handleControlEvent?(event: any): Promise<void>;
 
   /** Get current operational status */
   getStatus(): Promise<AdapterStatus>;

@@ -4,6 +4,20 @@ import { recordingRepo } from '@zoom-assistant/database';
 
 export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
   /**
+   * WS /api/live/control — WebSocket endpoint for Human-in-the-Loop browser control
+   */
+  fastify.get('/api/live/control', { websocket: true }, (connection) => {
+    connection.socket.on('message', async (message: Buffer) => {
+      try {
+        const event = JSON.parse(message.toString());
+        await meetingService.dispatchControlEvent(event);
+      } catch (err) {
+        // ignore invalid messages
+      }
+    });
+  });
+
+  /**
    * GET /api/recordings — List all recorded videos saved in PostgreSQL database
    */
   fastify.get('/api/recordings', async (_request, reply) => {
@@ -486,6 +500,7 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
             <span class="live-tag" id="liveTag">LIVE</span>
           </div>
           <div class="toggle-group">
+            <button id="takeControlBtn" class="btn btn-primary" style="display: none; background: #f59e0b; box-shadow: none;">⚠️ Needs Help: Take Control</button>
             <span>Live Stream</span>
             <label class="switch">
               <input type="checkbox" id="autoRefreshToggle" checked>
@@ -558,6 +573,73 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
     const framesOverlay = document.getElementById('framesOverlay');
     const lastUpdateOverlay = document.getElementById('lastUpdateOverlay');
     const recorderStatusVal = document.getElementById('recorderStatusVal');
+    const takeControlBtn = document.getElementById('takeControlBtn');
+
+    let isControlling = false;
+    let ws = null;
+
+    function initWebSocket() {
+      if (ws) return;
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      ws = new WebSocket(`${protocol}//${window.location.host}/api/live/control`);
+      ws.onopen = () => console.log('WebSocket connected');
+      ws.onclose = () => { console.log('WebSocket disconnected'); ws = null; };
+    }
+
+    takeControlBtn.addEventListener('click', () => {
+      isControlling = !isControlling;
+      if (isControlling) {
+        initWebSocket();
+        takeControlBtn.style.background = '#10b981';
+        takeControlBtn.textContent = '✅ Controlling (Click to Release)';
+        screenImg.style.cursor = 'crosshair';
+      } else {
+        takeControlBtn.style.background = '#f59e0b';
+        takeControlBtn.textContent = '⚠️ Needs Help: Take Control';
+        screenImg.style.cursor = 'default';
+      }
+    });
+
+    function sendWsEvent(event) {
+      if (ws && ws.readyState === 1 && isControlling) {
+        ws.send(JSON.stringify(event));
+      }
+    }
+
+    screenImg.addEventListener('mousedown', (e) => {
+      if (!isControlling) return;
+      e.preventDefault();
+      const rect = screenImg.getBoundingClientRect();
+      sendWsEvent({ type: 'mousedown', x: (e.clientX - rect.left) * (1280 / rect.width), y: (e.clientY - rect.top) * (720 / rect.height) });
+    });
+    screenImg.addEventListener('mouseup', (e) => {
+      if (!isControlling) return;
+      e.preventDefault();
+      const rect = screenImg.getBoundingClientRect();
+      sendWsEvent({ type: 'mouseup', x: (e.clientX - rect.left) * (1280 / rect.width), y: (e.clientY - rect.top) * (720 / rect.height) });
+    });
+    screenImg.addEventListener('mousemove', (e) => {
+      if (!isControlling) return;
+      const rect = screenImg.getBoundingClientRect();
+      sendWsEvent({ type: 'mousemove', x: (e.clientX - rect.left) * (1280 / rect.width), y: (e.clientY - rect.top) * (720 / rect.height) });
+    });
+    screenImg.addEventListener('click', (e) => {
+      if (!isControlling) return;
+      e.preventDefault();
+      const rect = screenImg.getBoundingClientRect();
+      sendWsEvent({ type: 'click', x: (e.clientX - rect.left) * (1280 / rect.width), y: (e.clientY - rect.top) * (720 / rect.height) });
+    });
+    
+    document.addEventListener('keydown', (e) => {
+      if (!isControlling) return;
+      e.preventDefault();
+      sendWsEvent({ type: 'keydown', key: e.key });
+    });
+    document.addEventListener('keyup', (e) => {
+      if (!isControlling) return;
+      e.preventDefault();
+      sendWsEvent({ type: 'keyup', key: e.key });
+    });
 
     function refreshScreen() {
       const timestamp = Date.now();
@@ -587,6 +669,12 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
               stateBadge.textContent = 'CONNECTING';
               stateBadge.className = 'badge-status badge-connecting';
             }
+
+            if (data.needsHumanInteraction && !isControlling) {
+              takeControlBtn.style.display = 'inline-flex';
+            } else if (!data.needsHumanInteraction && !isControlling) {
+              takeControlBtn.style.display = 'none';
+            }
           } else {
             meetingIdVal.textContent = '—';
             displayNameVal.textContent = '—';
@@ -595,6 +683,7 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
             recorderStatusVal.textContent = 'Ready';
             stateBadge.textContent = 'IDLE';
             stateBadge.className = 'badge-status badge-idle';
+            takeControlBtn.style.display = 'none';
           }
         }
       } catch (err) {

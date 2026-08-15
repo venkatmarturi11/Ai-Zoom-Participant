@@ -12,6 +12,8 @@ export function createServer() {
     logger: false, // We use pino logger explicitly
   });
 
+  fastify.register(import('@fastify/websocket'));
+
   fastify.register(cors, {
     origin: true,
   });

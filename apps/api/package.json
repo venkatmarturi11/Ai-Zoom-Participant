@@ -12,14 +12,15 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "fastify": "^4.28.0",
     "@fastify/cors": "^9.0.1",
-    "@zoom-assistant/shared": "*",
-    "@zoom-assistant/database": "*",
+    "@fastify/websocket": "^11.3.0",
     "@zoom-assistant/crypto": "*",
-    "@zoom-assistant/zoom": "*",
+    "@zoom-assistant/database": "*",
     "@zoom-assistant/orchestrator": "*",
-    "@zoom-assistant/telegram-bot": "*"
+    "@zoom-assistant/shared": "*",
+    "@zoom-assistant/telegram-bot": "*",
+    "@zoom-assistant/zoom": "*",
+    "fastify": "^4.28.0"
   },
   "devDependencies": {
     "tsx": "^4.16.0"

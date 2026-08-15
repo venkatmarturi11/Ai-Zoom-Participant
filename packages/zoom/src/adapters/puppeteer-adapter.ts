@@ -51,6 +51,7 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
   private isWaitingRoom = false;
   private isEnded = false;
   private cloudRecordingStarted = false;
+  private needsHumanInteraction = false;
 
   constructor(
     _userId: string,
@@ -376,11 +377,19 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
         }, this.displayName, this.passcode).catch(() => false);
       };
 
-      // Attempt join up to 40 seconds, checking for meeting UI or waiting room
+      // Attempt join up to 40 seconds (or longer if human interaction is needed)
       const checkStart = Date.now();
       let hasEnteredMeeting = false;
 
-      while (Date.now() - checkStart < 40000) {
+      while (true) {
+        const elapsed = Date.now() - checkStart;
+        if (elapsed > 40000 && !this.needsHumanInteraction) {
+          break; // Timeout after 40s only if no human interaction is detected
+        }
+        if (elapsed > 600000) {
+          break; // Hard timeout after 10 minutes regardless
+        }
+
         await fillAndJoinMeeting();
 
         const state = await this.page.evaluate(() => {
@@ -396,9 +405,18 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
             Boolean(document.querySelector('canvas')) ||
             Boolean(document.querySelector('#wc-container')) ||
             (text.includes('participants') && text.includes('leave')) ||
-            text.includes('joining meeting...');
-          return { inWaitingRoom, hasMeetingUI };
-        }).catch(() => ({ inWaitingRoom: false, hasMeetingUI: false }));
+          const url = window.location.href || '';
+          const needsHuman = url.includes('signin') || url.includes('login') || text.includes('captcha') || text.includes('verify you are human') || text.includes('security check');
+          return { inWaitingRoom, hasMeetingUI, needsHuman };
+        }).catch(() => ({ inWaitingRoom: false, hasMeetingUI: false, needsHuman: false }));
+
+        if (state.needsHuman && !this.needsHumanInteraction) {
+          this.needsHumanInteraction = true;
+          log.info({ meetingId: this.meetingId }, '🚨 Bot requires human interaction (Login/CAPTCHA detected). Pausing automation timeouts.');
+        } else if (!state.needsHuman && this.needsHumanInteraction && state.hasMeetingUI) {
+          this.needsHumanInteraction = false;
+          log.info({ meetingId: this.meetingId }, '✅ Human interaction resolved, resuming automation.');
+        }
 
         if (state.hasMeetingUI) {
           hasEnteredMeeting = true;
@@ -526,6 +544,7 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
       connected: this.isConnected,
       waitingRoom: this.isWaitingRoom,
       meetingEnded: this.isEnded,
+      needsHumanInteraction: this.needsHumanInteraction,
       details: {
         capability: this.capabilityType,
         browserActive: Boolean(this.browser),
@@ -534,6 +553,27 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
         cloudRecordingStarted: this.cloudRecordingStarted,
       },
     };
+  }
+
+  public async handleControlEvent(event: any): Promise<void> {
+    if (!this.page) return;
+    try {
+      if (event.type === 'click') {
+        await this.page.mouse.click(event.x, event.y);
+      } else if (event.type === 'mousedown') {
+        await this.page.mouse.down();
+      } else if (event.type === 'mouseup') {
+        await this.page.mouse.up();
+      } else if (event.type === 'mousemove') {
+        await this.page.mouse.move(event.x, event.y);
+      } else if (event.type === 'keydown') {
+        await this.page.keyboard.down(event.key);
+      } else if (event.type === 'keyup') {
+        await this.page.keyboard.up(event.key);
+      }
+    } catch (err) {
+      log.warn({ error: String(err) }, 'Failed to dispatch control event to page');
+    }
   }
 
   public async stop(): Promise<void> {
