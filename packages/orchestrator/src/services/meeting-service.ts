@@ -184,7 +184,11 @@ export class MeetingService {
   /**
    * Stop an active meeting session with ownership check.
    */
-  public async stopMeeting(telegramUserId: bigint, meetingId: string, reason: string = 'USER_STOPPED'): Promise<Meeting> {
+  public async stopMeeting(
+    telegramUserId: bigint,
+    meetingId: string,
+    reason: string = 'USER_STOPPED',
+  ): Promise<{ meeting: Meeting; recordingFilePath?: string }> {
     const { user } = await this.validateUserAndAccount(telegramUserId);
 
     const meeting = await meetingRepo.findById(meetingId);
@@ -202,15 +206,23 @@ export class MeetingService {
       throw new ZoomError(ZoomErrorCode.NOT_ALLOWED, `Meeting is already in terminal state '${meeting.status}'`);
     }
 
-    // Close headless browser if running
+    // Close headless browser if running and extract recording file
+    let recordingFilePath: string | undefined;
     const browserAdapter = activeBrowserAdapters.get(meetingId);
     if (browserAdapter) {
+      try {
+        const status = await browserAdapter.getStatus();
+        recordingFilePath =
+          (status.details?.['recordingFilePath'] as string | undefined) || browserAdapter.getRecordingFilePath();
+      } catch {
+        // ignore
+      }
       await browserAdapter.stop().catch(() => {});
       activeBrowserAdapters.delete(meetingId);
     }
 
-    // Update status to STOPPING
-    const updated = await meetingRepo.updateStatus(meetingId, 'STOPPING');
+    // Update status to COMPLETED
+    const updated = await meetingRepo.updateStatus(meetingId, 'COMPLETED');
 
     // Enqueue BullMQ stop job
     await queueProducers.enqueueMeetingStop({
@@ -229,8 +241,8 @@ export class MeetingService {
       metadata: { meetingId, reason },
     });
 
-    log.info({ meetingId, userId: user.id }, 'Meeting stop enqueued');
-    return updated;
+    log.info({ meetingId, userId: user.id, recordingFilePath }, 'Meeting stop completed');
+    return { meeting: updated, recordingFilePath };
   }
 
   /**

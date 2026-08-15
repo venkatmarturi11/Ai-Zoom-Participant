@@ -1,7 +1,10 @@
+import fs from 'node:fs';
+import { InputFile } from 'grammy';
 import type { BotContext } from '../bot.js';
 import { userRepo, meetingRepo, auditRepo } from '@zoom-assistant/database';
 import { getMeetingRecordings, getValidAccessToken } from '@zoom-assistant/zoom';
 import { queueProducers } from '@zoom-assistant/queue';
+import { meetingService } from '@zoom-assistant/orchestrator';
 import { createLogger } from '@zoom-assistant/shared';
 
 const log = createLogger({ module: 'stop-command' });
@@ -41,66 +44,96 @@ export async function stopCommand(ctx: BotContext): Promise<void> {
     ? formatDuration(Date.now() - active.actualStart.getTime())
     : '00:00:00';
 
+  // Stop meeting session and capture local screen recording if active
+  let localRecordingPath: string | undefined;
   try {
-    await meetingRepo.updateStatus(active.id, 'STOPPING');
-    await meetingRepo.updateStatus(active.id, 'COMPLETED');
+    const stopResult = await meetingService.stopMeeting(telegramUserId, active.id);
+    localRecordingPath = stopResult.recordingFilePath;
+  } catch (err: any) {
+    log.warn({ error: err?.message }, 'MeetingService.stopMeeting warning');
+  }
 
-    await queueProducers.enqueueMeetingStop({
-      meetingId: active.id,
-      userId: user.id,
-      zoomMeetingId: active.zoomMeetingId,
-      requestedAt: new Date().toISOString(),
-      reason: 'USER_STOPPED',
-    }).catch(() => {});
-
+  try {
     await auditRepo.log({
       userId: user.id,
       action: 'MEETING_STOPPED_MANUALLY',
       metadata: { meetingId: active.id, duration: durationStr },
     }).catch(() => {});
   } catch {
-    // DB error, continue
+    // ignore
   }
 
-  // Check for Zoom Cloud Recordings
-  let recordingInfo = '';
-  try {
-    const tokens = await getValidAccessToken(user.id).catch(() => null);
-    if (tokens?.accessToken) {
-      const recordings = await getMeetingRecordings(active.zoomMeetingId, tokens.accessToken);
-      if (recordings && recordings.recordingFiles.length > 0) {
-        const mp4Files = recordings.recordingFiles.filter((f) => f.fileType === 'MP4');
-        if (mp4Files.length > 0) {
-          const mainVideo = mp4Files[0]!;
-          recordingInfo =
-            `\n🎬 <b>Meeting Recording:</b>\n` +
-            `📹 <b>Format:</b> MP4 Video\n` +
-            (mainVideo.playUrl ? `▶️ <a href="${mainVideo.playUrl}">Watch Recording Online</a>\n` : '') +
-            (mainVideo.downloadUrl ? `💾 <a href="${mainVideo.downloadUrl}">Download MP4 Video</a>\n` : '');
-        } else if (recordings.shareUrl) {
-          recordingInfo = `\n🎬 <b>Recording Link:</b> <a href="${recordings.shareUrl}">View Meeting Recording</a>\n`;
-        }
-      } else {
-        recordingInfo = `\n📹 <b>Zoom Cloud Recording:</b> <i>Still processing on Zoom's servers — I'll message you here as soon as it's ready.</i>\n`;
+  // 1. Deliver Instant High-Definition Screen Recording if available
+  let sentInstantVideo = false;
+  if (localRecordingPath && fs.existsSync(localRecordingPath)) {
+    const stats = fs.statSync(localRecordingPath);
+    if (stats.size > 0 && stats.size <= 50 * 1024 * 1024) {
+      try {
+        await ctx.replyWithVideo(new InputFile(localRecordingPath), {
+          caption:
+            `🎬 <b>Meeting Screen Recording</b>\n\n` +
+            `📌 <b>Meeting ID:</b> <code>${active.zoomMeetingId}</code>\n` +
+            `⏱️ <b>Attended Duration:</b> <code>${durationStr}</code>\n` +
+            `📹 <b>Format:</b> High Definition MP4 Video\n` +
+            `🤖 <i>Delivered instantly from meeting bot</i>`,
+          parse_mode: 'HTML',
+          supports_streaming: true,
+        });
+        sentInstantVideo = true;
+        log.info({ localRecordingPath, meetingId: active.id }, 'Delivered instant MP4 video to user on /stop');
+      } catch (uploadErr: any) {
+        log.error({ error: uploadErr?.message }, 'Failed to upload instant video via replyWithVideo');
+      } finally {
         try {
-          await queueProducers.enqueueRecordingCheck(
-            {
-              meetingId: active.id,
-              userId: user.id,
-              zoomMeetingId: active.zoomMeetingId,
-              telegramChatId: String(ctx.from!.id),
-              requestedAt: new Date().toISOString(),
-              attempt: 1,
-            },
-            5 * 60 * 1000, // first check 5 minutes after stop
-          );
-        } catch (enqueueErr: any) {
-          log.warn({ error: enqueueErr?.message }, 'Failed to enqueue recording check');
+          fs.unlinkSync(localRecordingPath);
+        } catch {
+          // ignore
         }
       }
     }
-  } catch (recErr: any) {
-    log.warn({ error: recErr.message }, 'Failed to check recordings on stop');
+  }
+
+  // 2. Check for Zoom Cloud Recordings if instant video wasn't available
+  let recordingInfo = '';
+  if (!sentInstantVideo) {
+    try {
+      const tokens = await getValidAccessToken(user.id).catch(() => null);
+      if (tokens?.accessToken) {
+        const recordings = await getMeetingRecordings(active.zoomMeetingId, tokens.accessToken);
+        if (recordings && recordings.recordingFiles.length > 0) {
+          const mp4Files = recordings.recordingFiles.filter((f) => f.fileType === 'MP4');
+          if (mp4Files.length > 0) {
+            const mainVideo = mp4Files[0]!;
+            recordingInfo =
+              `\n🎬 <b>Meeting Recording:</b>\n` +
+              `📹 <b>Format:</b> MP4 Video\n` +
+              (mainVideo.playUrl ? `▶️ <a href="${mainVideo.playUrl}">Watch Recording Online</a>\n` : '') +
+              (mainVideo.downloadUrl ? `💾 <a href="${mainVideo.downloadUrl}">Download MP4 Video</a>\n` : '');
+          } else if (recordings.shareUrl) {
+            recordingInfo = `\n🎬 <b>Recording Link:</b> <a href="${recordings.shareUrl}">View Meeting Recording</a>\n`;
+          }
+        } else {
+          recordingInfo = `\n📹 <b>Zoom Cloud Recording:</b> <i>Still processing on Zoom's servers — I'll message you here as soon as it's ready.</i>\n`;
+          try {
+            await queueProducers.enqueueRecordingCheck(
+              {
+                meetingId: active.id,
+                userId: user.id,
+                zoomMeetingId: active.zoomMeetingId,
+                telegramChatId: String(ctx.from!.id),
+                requestedAt: new Date().toISOString(),
+                attempt: 1,
+              },
+              5 * 60 * 1000,
+            );
+          } catch (enqueueErr: any) {
+            log.warn({ error: enqueueErr?.message }, 'Failed to enqueue recording check');
+          }
+        }
+      }
+    } catch (recErr: any) {
+      log.warn({ error: recErr.message }, 'Failed to check recordings on stop');
+    }
   }
 
   await ctx.reply(
@@ -108,7 +141,7 @@ export async function stopCommand(ctx: BotContext): Promise<void> {
     `📌 <b>Meeting ID:</b> <code>${active.zoomMeetingId}</code>\n` +
     `⏱️ <b>Attended Duration:</b> <code>${durationStr}</code>\n` +
     `🤖 <b>Status:</b> Completed & Cleaned Up\n` +
-    recordingInfo +
+    (sentInstantVideo ? `\n🎥 <i>Your full meeting video recording was delivered above!</i>` : recordingInfo) +
     `\nThe assistant has finished the meeting. You can send another Zoom link anytime to start a new session!`,
     { parse_mode: 'HTML', link_preview_options: { is_disabled: false } },
   );
@@ -129,6 +162,8 @@ export async function handleStopConfirm(ctx: BotContext, meetingId: string): Pro
 
   let durationStr = '00:00:00';
   let meetingIdStr = meetingId;
+  let localRecordingPath: string | undefined;
+
   try {
     const meeting = await meetingRepo.findById(meetingId);
     if (meeting?.actualStart) {
@@ -136,16 +171,8 @@ export async function handleStopConfirm(ctx: BotContext, meetingId: string): Pro
       meetingIdStr = meeting.zoomMeetingId;
     }
 
-    await meetingRepo.updateStatus(meetingId, 'STOPPING');
-    await meetingRepo.updateStatus(meetingId, 'COMPLETED');
-
-    await queueProducers.enqueueMeetingStop({
-      meetingId,
-      userId: user.id,
-      zoomMeetingId: meetingIdStr,
-      requestedAt: new Date().toISOString(),
-      reason: 'USER_STOPPED',
-    }).catch(() => {});
+    const stopResult = await meetingService.stopMeeting(telegramUserId, meetingId);
+    localRecordingPath = stopResult.recordingFilePath;
 
     await auditRepo.log({
       userId: user.id,
@@ -157,6 +184,32 @@ export async function handleStopConfirm(ctx: BotContext, meetingId: string): Pro
   }
 
   log.info({ meetingId, userId: user.id }, 'Meeting session stopped by user');
+
+  if (localRecordingPath && fs.existsSync(localRecordingPath)) {
+    const stats = fs.statSync(localRecordingPath);
+    if (stats.size > 0 && stats.size <= 50 * 1024 * 1024) {
+      try {
+        await ctx.replyWithVideo(new InputFile(localRecordingPath), {
+          caption:
+            `🎬 <b>Meeting Screen Recording</b>\n\n` +
+            `📌 <b>Meeting ID:</b> <code>${meetingIdStr}</code>\n` +
+            `⏱️ <b>Attended Duration:</b> <code>${durationStr}</code>\n` +
+            `📹 <b>Format:</b> High Definition MP4 Video\n` +
+            `🤖 <i>Delivered instantly from meeting bot</i>`,
+          parse_mode: 'HTML',
+          supports_streaming: true,
+        });
+      } catch (uploadErr: any) {
+        log.error({ error: uploadErr?.message }, 'Failed to upload video via callback');
+      } finally {
+        try {
+          fs.unlinkSync(localRecordingPath);
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
 
   await ctx.editMessageText(
     `✅ <b>Meeting Session Ended!</b>\n\n` +
