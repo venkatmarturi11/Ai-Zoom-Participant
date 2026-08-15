@@ -13,7 +13,7 @@
     "dev:scheduler": "npm run dev --workspace=apps/scheduler",
     "build:packages": "npm run build -w packages/shared -w packages/crypto -w packages/database -w packages/meeting-parser -w packages/queue -w packages/zoom -w packages/orchestrator",
     "build:apps": "npm run build -w apps/telegram-bot -w apps/api -w apps/scheduler -w apps/worker",
-    "build": "npm run build:packages && npm run build:apps",
+    "build": "npm run db:generate && npm run build:packages && npm run build:apps",
     "start": "node apps/api/dist/index.js",
     "test": "tsx --test packages/meeting-parser/src/parser.test.ts packages/crypto/src/encryption.test.ts packages/zoom/src/capabilities/capability-resolver.test.ts packages/queue/src/locks.test.ts packages/queue/src/producers.test.ts apps/worker/src/state/state-machine.test.ts apps/worker/src/meeting-worker.test.ts apps/worker/src/worker-manager.test.ts apps/worker/src/monitoring/reconnect.test.ts apps/scheduler/src/recovery.test.ts apps/api/src/services/meeting-service.test.ts apps/telegram-bot/src/services/notification-service.test.ts",
     "test:zoom": "RUN_LIVE_ZOOM_TESTS=true tsx --test tests/integration/**/*.test.ts",
