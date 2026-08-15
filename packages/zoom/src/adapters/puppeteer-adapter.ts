@@ -108,9 +108,9 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
     this.recordingFilePath = outFile;
 
     const recorder = new PuppeteerScreenRecorder(page as any, {
-      fps: 10,
-      videoFrame: { width: 1280, height: 720 },
-      videoBitrate: 1000,
+      fps: 4, // Ultra-low FPS to save CPU
+      videoFrame: { width: 854, height: 480 }, // 480p resolution
+      videoBitrate: 300, // Reduced bitrate
       videoCodec: 'libx264',
       videoFormat: 'mp4',
       aspectRatio: '16:9',
@@ -126,11 +126,11 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
     let frameCount = 0;
     let isStopped = false;
 
-    // Lightweight interval just for updating the dashboard view (1 FPS)
+    // Lightweight interval for updating the Telegram view (every 15 seconds to save huge CPU)
     let dashboardInterval: NodeJS.Timeout | null = setInterval(async () => {
       if (isStopped || !page) return;
       try {
-        const buf = await page.screenshot({ type: 'jpeg', quality: 50 });
+        const buf = await page.screenshot({ type: 'jpeg', quality: 30 }); // Lower JPEG quality
         if (buf && buf.length > 0) {
           this.latestScreenshot = buf as Buffer;
           frameCount++;
@@ -138,7 +138,7 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
       } catch {
         // ignore navigation errors
       }
-    }, 1000);
+    }, 15000);
 
     const stop = async (): Promise<string | undefined> => {
       if (isStopped) return outFile;
@@ -230,10 +230,10 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
           '--use-fake-ui-for-media-stream',
           '--use-fake-device-for-media-stream',
           '--autoplay-policy=no-user-gesture-required',
-          '--window-size=1280,720',
+          '--window-size=854,480',
           '--use-gl=swiftshader',
         ],
-        defaultViewport: { width: 1280, height: 720 },
+        defaultViewport: { width: 854, height: 480 },
       }) as unknown as Browser;
 
       this.page = await this.browser.newPage();
