@@ -164,6 +164,38 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
     };
   }
 
+  private async loginToZoom(): Promise<void> {
+    const email = process.env['ZOOM_BOT_EMAIL'];
+    const password = process.env['ZOOM_BOT_PASSWORD'];
+
+    if (!email || !password || !this.page) {
+      return;
+    }
+
+    log.info({ meetingId: this.meetingId }, 'Attempting to log into Zoom account...');
+    try {
+      await this.page.goto('https://zoom.us/signin', { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await new Promise((res) => setTimeout(res, 2000));
+
+      // Dismiss cookies
+      const acceptCookies = await this.page.$('#onetrust-accept-btn-handler').catch(() => null);
+      if (acceptCookies) await acceptCookies.click().catch(() => {});
+
+      await this.page.type('input[name="email"], input[type="email"], #email', email, { delay: 50 });
+      await this.page.type('input[name="password"], input[type="password"], #password', password, { delay: 50 });
+      
+      const submitBtn = await this.page.$('button[type="submit"], #js_btn_login');
+      if (submitBtn) {
+        await submitBtn.click();
+        log.info({ meetingId: this.meetingId }, 'Clicked login submit, waiting for navigation...');
+        await this.page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+        log.info({ meetingId: this.meetingId }, 'Zoom login attempt completed');
+      }
+    } catch (err: any) {
+      log.warn({ error: err.message, meetingId: this.meetingId }, 'Zoom login attempt failed (CAPTCHA or timeout)');
+    }
+  }
+
   public async connect(): Promise<void> {
     log.info({ meetingId: this.meetingId, displayName: this.displayName }, 'Launching headless browser to join Zoom room...');
 
@@ -215,6 +247,9 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
       const context = this.browser.defaultBrowserContext();
       await context.overridePermissions('https://app.zoom.us', ['microphone', 'camera']).catch(() => {});
       await context.overridePermissions('https://pwa.zoom.us', ['microphone', 'camera']).catch(() => {});
+
+      // Attempt to log in if credentials are provided
+      await this.loginToZoom();
 
       // Initialize direct screenshot-to-FFmpeg frame recorder
       this.frameRecorder = this.startFrameRecorder(this.page, this.meetingId);
