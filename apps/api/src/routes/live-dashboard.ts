@@ -536,12 +536,14 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
           • The bot will join audio and begin recording automatically.<br>
           • Send <code>/stop</code> in Telegram at any time to receive the finalized MP4 recording.
         </div>
-      <!-- Saved Database Recordings Section -->
-      <div class="panel" style="grid-column: 1 / -1; margin-top: 10px;">
-        <h2>📼 Saved Video Recordings (Stored in PostgreSQL Database)</h2>
-        <div id="recordingsList" style="display: grid; gap: 10px; margin-top: 12px;">
-          <div style="color: var(--text-muted); font-size: 13px;">Loading recordings...</div>
-        </div>
+      </div>
+    </div>
+
+    <!-- Saved Database Recordings Section -->
+    <div class="panel" style="margin-top: 20px;">
+      <h2>📼 Saved Video Recordings (Stored in PostgreSQL Database)</h2>
+      <div id="recordingsList" style="display: grid; gap: 10px; margin-top: 12px;">
+        <div style="color: var(--text-muted); font-size: 13px;">Loading database recordings...</div>
       </div>
     </div>
   </div>
