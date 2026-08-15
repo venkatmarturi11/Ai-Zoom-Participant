@@ -27,8 +27,6 @@ export {
 } from './capability/index.js';
 export {
   createMeetingAdapter,
-  ZakParticipantAdapter,
-  ObfParticipantAdapter,
   RtmsMediaAdapter,
   PuppeteerZoomAdapter,
   type MeetingAdapter,
