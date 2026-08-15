@@ -1,4 +1,10 @@
-import puppeteer, { type Browser, type Page } from 'puppeteer-core';
+import * as puppeteerCore from 'puppeteer-core';
+import type { Browser, Page } from 'puppeteer-core';
+import { addExtra } from 'puppeteer-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+
+const puppeteer = addExtra(puppeteerCore as any);
+puppeteer.use(StealthPlugin());
 import { spawn, type ChildProcess } from 'node:child_process';
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import fs from 'node:fs';
@@ -225,16 +231,15 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
           '--no-sandbox',
           '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
-          '--disable-accelerated-2d-canvas',
-          '--disable-gpu',
           '--disable-blink-features=AutomationControlled',
           '--use-fake-ui-for-media-stream',
           '--use-fake-device-for-media-stream',
           '--autoplay-policy=no-user-gesture-required',
           '--window-size=1280,720',
+          '--use-gl=swiftshader',
         ],
         defaultViewport: { width: 1280, height: 720 },
-      });
+      }) as unknown as Browser;
 
       this.page = await this.browser.newPage();
 

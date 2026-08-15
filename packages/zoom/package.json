@@ -9,11 +9,13 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@zoom-assistant/crypto": "*",
     "@zoom-assistant/database": "*",
     "@zoom-assistant/shared": "*",
     "puppeteer-core": "^22.15.0",
-    "puppeteer-screen-recorder": "^3.0.6",
-    "@ffmpeg-installer/ffmpeg": "^1.1.0"
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "puppeteer-screen-recorder": "^3.0.6"
   }
 }
