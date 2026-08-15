@@ -1,5 +1,5 @@
 import puppeteer, { type Browser, type Page } from 'puppeteer-core';
-import { PuppeteerScreenRecorder } from 'puppeteer-screen-recorder';
+import { spawn, type ChildProcess } from 'node:child_process';
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -43,11 +43,16 @@ function getFfmpegExecutablePath(): string | undefined {
   return undefined;
 }
 
+interface FrameRecorder {
+  stop: () => Promise<string | undefined>;
+  getFrameCount: () => number;
+}
+
 export class PuppeteerZoomAdapter implements MeetingAdapter {
   public readonly capabilityType = 'WEB_PARTICIPANT';
   private browser?: Browser;
   private page?: Page;
-  private recorder?: PuppeteerScreenRecorder;
+  private frameRecorder?: FrameRecorder;
   private recordingFilePath?: string;
   private isConnected = false;
   private isWaitingRoom = false;
@@ -67,6 +72,95 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
 
   public async authenticate(): Promise<void> {
     log.info({ meetingId: this.meetingId }, 'Prepared Zoom Web Client parameters');
+  }
+
+  private startFrameRecorder(page: Page, meetingId: string): FrameRecorder {
+    const ffmpegPath = getFfmpegExecutablePath() || 'ffmpeg';
+    const recordingsDir = path.join(os.tmpdir(), 'zoom-recordings');
+    if (!fs.existsSync(recordingsDir)) {
+      fs.mkdirSync(recordingsDir, { recursive: true });
+    }
+    const outFile = path.join(recordingsDir, `meeting-${meetingId}-${Date.now()}.mp4`);
+    this.recordingFilePath = outFile;
+
+    const FPS = 5;
+    const intervalMs = Math.floor(1000 / FPS);
+    let frameCount = 0;
+    let screenshotInterval: NodeJS.Timeout | null = null;
+    let isStopped = false;
+
+    const ffmpegArgs = [
+      '-y',
+      '-f', 'image2pipe',
+      '-vcodec', 'mjpeg',
+      '-r', String(FPS),
+      '-i', '-',
+      '-c:v', 'libx264',
+      '-preset', 'ultrafast',
+      '-tune', 'zerolatency',
+      '-movflags', '+faststart',
+      '-pix_fmt', 'yuv420p',
+      '-vf', 'scale=1280:720',
+      outFile,
+    ];
+
+    log.info({ ffmpegPath, outFile, fps: FPS }, '🎥 Starting direct screenshot-to-FFmpeg screen recorder');
+
+    let ffmpegProc: ChildProcess | null = null;
+    try {
+      ffmpegProc = spawn(ffmpegPath, ffmpegArgs);
+
+      ffmpegProc.on('error', (err) => {
+        log.warn({ error: err.message }, 'FFmpeg spawn error');
+      });
+
+      screenshotInterval = setInterval(async () => {
+        if (isStopped || !page) return;
+        try {
+          const buf = await page.screenshot({ type: 'jpeg', quality: 80 });
+          if (ffmpegProc && ffmpegProc.stdin && ffmpegProc.stdin.writable && buf && buf.length > 0) {
+            ffmpegProc.stdin.write(buf);
+            frameCount++;
+          }
+        } catch {
+          // Frame skipped during navigation
+        }
+      }, intervalMs);
+    } catch (spawnErr: any) {
+      log.warn({ error: spawnErr?.message }, 'Failed to spawn FFmpeg process');
+    }
+
+    const stop = async (): Promise<string | undefined> => {
+      if (isStopped) return outFile;
+      isStopped = true;
+
+      if (screenshotInterval) {
+        clearInterval(screenshotInterval);
+        screenshotInterval = null;
+      }
+
+      if (ffmpegProc && ffmpegProc.stdin && ffmpegProc.stdin.writable) {
+        ffmpegProc.stdin.end();
+      }
+
+      await new Promise<void>((resolve) => {
+        if (!ffmpegProc || ffmpegProc.killed || ffmpegProc.exitCode !== null) return resolve();
+        ffmpegProc.on('close', () => resolve());
+        setTimeout(resolve, 8000);
+      });
+
+      if (fs.existsSync(outFile)) {
+        const stats = fs.statSync(outFile);
+        log.info({ outFile, sizeBytes: stats.size, frames: frameCount }, '🎥 Screen recording MP4 saved successfully');
+        return outFile;
+      }
+      return undefined;
+    };
+
+    return {
+      stop,
+      getFrameCount: () => frameCount,
+    };
   }
 
   public async connect(): Promise<void> {
@@ -122,32 +216,8 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
       await context.overridePermissions('https://app.zoom.us', ['microphone', 'camera']).catch(() => {});
       await context.overridePermissions('https://pwa.zoom.us', ['microphone', 'camera']).catch(() => {});
 
-      // Initialize headless screen recording to capture the entire session
-      const ffmpegPath = getFfmpegExecutablePath();
-      log.info({ ffmpegPath }, 'Using FFmpeg executable for screen recording');
-
-      const recordingsDir = path.join(os.tmpdir(), 'zoom-recordings');
-      if (!fs.existsSync(recordingsDir)) {
-        fs.mkdirSync(recordingsDir, { recursive: true });
-      }
-      this.recordingFilePath = path.join(recordingsDir, `meeting-${this.meetingId}-${Date.now()}.mp4`);
-
-      try {
-        this.recorder = new PuppeteerScreenRecorder(this.page as any, {
-          followNewTab: false,
-          fps: 15,
-          ffmpeg_Path: ffmpegPath,
-          videoFrame: {
-            width: 1280,
-            height: 720,
-          },
-          aspectRatio: '16:9',
-        });
-        await this.recorder.start(this.recordingFilePath);
-        log.info({ recordingFilePath: this.recordingFilePath }, '🎥 Headless screen recorder started capturing meeting session');
-      } catch (recErr: any) {
-        log.warn({ error: recErr?.message }, 'Could not initialize screen recorder (proceeding with meeting join)');
-      }
+      // Initialize direct screenshot-to-FFmpeg frame recorder
+      this.frameRecorder = this.startFrameRecorder(this.page, this.meetingId);
 
       // Construct direct Zoom Web Client join URL
       const cleanMeetingId = String(this.meetingId).replace(/[\s-]/g, '');
@@ -329,13 +399,13 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
       this.isConnected = false;
 
       // Stop and clean up recorder if failed
-      if (this.recorder) {
+      if (this.frameRecorder) {
         try {
-          await this.recorder.stop();
+          await this.frameRecorder.stop();
         } catch {
           // ignore
         }
-        this.recorder = undefined;
+        this.frameRecorder = undefined;
       }
 
       await this.browser?.close().catch(() => {});
@@ -425,33 +495,29 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
         capability: this.capabilityType,
         browserActive: Boolean(this.browser),
         recordingFilePath: this.recordingFilePath,
-        screenRecordingActive: Boolean(this.recorder),
+        screenRecordingActive: Boolean(this.frameRecorder),
         cloudRecordingStarted: this.cloudRecordingStarted,
       },
     };
   }
 
   public async stop(): Promise<void> {
-    log.info({ meetingId: this.meetingId }, 'Leaving Zoom meeting and closing browser');
+    log.info({ meetingId: this.meetingId }, 'Leaving Zoom meeting and finalizing video recording');
     this.isConnected = false;
     this.isEnded = true;
 
     try {
-      if (this.recorder) {
+      if (this.frameRecorder) {
         log.info({ meetingId: this.meetingId, path: this.recordingFilePath }, 'Finalizing screen recording MP4 video...');
-        await this.recorder.stop().catch((err: any) => {
+        await this.frameRecorder.stop().catch((err: any) => {
           log.warn({ error: err?.message }, 'Warning stopping screen recorder');
         });
-        this.recorder = undefined;
-        if (this.recordingFilePath && fs.existsSync(this.recordingFilePath)) {
-          const stats = fs.statSync(this.recordingFilePath);
-          log.info({ recordingFilePath: this.recordingFilePath, sizeBytes: stats.size }, '🎥 Screen recording MP4 file saved successfully');
-        }
+        this.frameRecorder = undefined;
       }
 
       if (this.page) {
         const leaveBtn = await this.page.$('button.footer__leave-btn');
-        if (leaveBtn) await leaveBtn.click();
+        if (leaveBtn) await leaveBtn.click().catch(() => {});
         await this.page.close().catch(() => {});
       }
       if (this.browser) {
