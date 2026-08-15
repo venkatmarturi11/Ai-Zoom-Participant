@@ -153,9 +153,9 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
       const cleanMeetingId = String(this.meetingId).replace(/[\s-]/g, '');
       const encodedName = encodeURIComponent(this.displayName);
       const encodedPwd = this.passcode ? encodeURIComponent(this.passcode) : '';
-      const joinUrl = `https://app.zoom.us/wc/join/${encodeURIComponent(cleanMeetingId)}?pwd=${encodedPwd}&uname=${encodedName}`;
+      const joinUrl = `https://app.zoom.us/wc/${encodeURIComponent(cleanMeetingId)}/join?pwd=${encodedPwd}&uname=${encodedName}`;
 
-      log.info({ meetingId: this.meetingId, joinUrl: `https://app.zoom.us/wc/join/${cleanMeetingId}?pwd=...` }, 'Navigating to Zoom Web Client');
+      log.info({ meetingId: this.meetingId, joinUrl: `https://app.zoom.us/wc/${cleanMeetingId}/join?pwd=...` }, 'Navigating to Zoom Web Client');
 
       await this.page.goto(joinUrl, { waitUntil: 'domcontentloaded', timeout: 35000 }).catch((err) => {
         log.warn({ error: err.message }, 'Initial page goto warning (proceeding)');

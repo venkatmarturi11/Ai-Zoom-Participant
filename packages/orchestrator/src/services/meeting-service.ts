@@ -24,6 +24,7 @@ export interface CreateMeetingParams {
   isExternalMeeting?: boolean;
   isHostAccount?: boolean;
   userPresentInMeeting?: boolean;
+  onStatusChange?: (status: 'CONNECTED' | 'FAILED' | 'WAITING_ROOM', detail?: string) => Promise<void> | void;
 }
 
 export interface ScheduleMeetingParams extends CreateMeetingParams {
@@ -64,7 +65,7 @@ export class MeetingService {
     const defaultDisplayName = user.telegramUsername ?? zoomAccount.zoomEmail.split('@')[0] ?? process.env['DEFAULT_DISPLAY_NAME'] ?? 'Meeting Assistant';
     const displayName = params.displayName ?? defaultDisplayName;
 
-    // Create DB meeting record
+    // Create DB meeting record with STARTING status
     const meeting = await meetingRepo.create({
       userId: user.id,
       zoomMeetingId: params.meetingId,
@@ -72,8 +73,7 @@ export class MeetingService {
       passcodeEncrypted,
       displayName,
       topic: `Zoom Meeting ${params.meetingId}`,
-      status: 'CONNECTED',
-      actualStart: new Date(),
+      status: 'STARTING',
     });
 
     // Enqueue BullMQ start job with deterministic job ID
@@ -102,8 +102,17 @@ export class MeetingService {
         try {
           await adapter.initialize();
           await adapter.connect();
+          await meetingRepo.updateStatus(meeting.id, 'CONNECTED');
+          log.info({ meetingId: meeting.id }, '✅ Headless browser participant entered meeting room and started recording');
+          if (params.onStatusChange) {
+            await params.onStatusChange('CONNECTED', 'Assistant entered meeting room and screen recording is active');
+          }
         } catch (err: any) {
-          log.warn({ error: err?.message }, 'Puppeteer browser connection background error');
+          log.error({ error: err?.message, meetingId: meeting.id }, 'Puppeteer browser connection failed');
+          await meetingRepo.updateStatus(meeting.id, 'FAILED').catch(() => {});
+          if (params.onStatusChange) {
+            await params.onStatusChange('FAILED', err?.message || 'Failed to connect to Zoom meeting');
+          }
         }
       });
     } catch (browserErr: any) {
