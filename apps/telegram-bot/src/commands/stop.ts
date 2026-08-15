@@ -46,9 +46,14 @@ export async function stopCommand(ctx: BotContext): Promise<void> {
 
   // Stop meeting session and capture local screen recording if active
   let localRecordingPath: string | undefined;
+  let databaseDownloadUrl: string | undefined;
+  let videoBuffer: Buffer | undefined;
+
   try {
     const stopResult = await meetingService.stopMeeting(telegramUserId, active.id);
     localRecordingPath = stopResult.recordingFilePath;
+    databaseDownloadUrl = stopResult.downloadUrl;
+    videoBuffer = stopResult.videoBuffer;
   } catch (err: any) {
     log.warn({ error: err?.message }, 'MeetingService.stopMeeting warning');
   }
@@ -57,7 +62,7 @@ export async function stopCommand(ctx: BotContext): Promise<void> {
     await auditRepo.log({
       userId: user.id,
       action: 'MEETING_STOPPED_MANUALLY',
-      metadata: { meetingId: active.id, duration: durationStr },
+      metadata: { meetingId: active.id, duration: durationStr, downloadUrl: databaseDownloadUrl },
     }).catch(() => {});
   } catch {
     // ignore
@@ -65,37 +70,49 @@ export async function stopCommand(ctx: BotContext): Promise<void> {
 
   // 1. Deliver Instant High-Definition Screen Recording if available
   let sentInstantVideo = false;
-  if (localRecordingPath && fs.existsSync(localRecordingPath)) {
-    const stats = fs.statSync(localRecordingPath);
-    if (stats.size > 0 && stats.size <= 50 * 1024 * 1024) {
+  const rawBytes = videoBuffer || (localRecordingPath && fs.existsSync(localRecordingPath) ? fs.readFileSync(localRecordingPath) : undefined);
+
+  if (rawBytes && rawBytes.length > 0) {
+    if (rawBytes.length <= 50 * 1024 * 1024) {
       try {
-        await ctx.replyWithVideo(new InputFile(localRecordingPath), {
+        await ctx.replyWithVideo(new InputFile(rawBytes, `meeting-${active.zoomMeetingId}.mp4`), {
           caption:
             `🎬 <b>Meeting Screen Recording</b>\n\n` +
             `📌 <b>Meeting ID:</b> <code>${active.zoomMeetingId}</code>\n` +
             `⏱️ <b>Attended Duration:</b> <code>${durationStr}</code>\n` +
             `📹 <b>Format:</b> High Definition MP4 Video\n` +
+            `💾 <b>Saved to Database:</b> ✅ Stored Permanently\n` +
+            (databaseDownloadUrl ? `📥 <a href="${databaseDownloadUrl}">Direct Web Download Link</a>\n\n` : '\n') +
             `🤖 <i>Delivered instantly from meeting bot</i>`,
           parse_mode: 'HTML',
           supports_streaming: true,
         });
         sentInstantVideo = true;
-        log.info({ localRecordingPath, meetingId: active.id }, 'Delivered instant MP4 video to user on /stop');
+        log.info({ meetingId: active.id, sizeBytes: rawBytes.length }, 'Delivered instant MP4 video to user on /stop');
       } catch (uploadErr: any) {
         log.error({ error: uploadErr?.message }, 'Failed to upload instant video via replyWithVideo');
-      } finally {
-        try {
-          fs.unlinkSync(localRecordingPath);
-        } catch {
-          // ignore
-        }
       }
+    } else {
+      log.warn({ sizeBytes: rawBytes.length }, 'Video exceeds Telegram 50MB limit; database download link provided');
+    }
+  }
+
+  // Clean up local temp file
+  if (localRecordingPath && fs.existsSync(localRecordingPath)) {
+    try {
+      fs.unlinkSync(localRecordingPath);
+    } catch {
+      // ignore
     }
   }
 
   // 2. Check for Zoom Cloud Recordings if instant video wasn't available
   let recordingInfo = '';
-  if (!sentInstantVideo) {
+  if (databaseDownloadUrl && !sentInstantVideo) {
+    recordingInfo =
+      `\n🎬 <b>Video Recording (Stored in Database):</b>\n` +
+      `📥 <a href="${databaseDownloadUrl}">Click here to Watch & Download Full Video</a>\n`;
+  } else if (!sentInstantVideo) {
     try {
       const tokens = await getValidAccessToken(user.id).catch(() => null);
       if (tokens?.accessToken) {
@@ -141,7 +158,9 @@ export async function stopCommand(ctx: BotContext): Promise<void> {
     `📌 <b>Meeting ID:</b> <code>${active.zoomMeetingId}</code>\n` +
     `⏱️ <b>Attended Duration:</b> <code>${durationStr}</code>\n` +
     `🤖 <b>Status:</b> Completed & Cleaned Up\n` +
-    (sentInstantVideo ? `\n🎥 <i>Your full meeting video recording was delivered above!</i>` : recordingInfo) +
+    (sentInstantVideo
+      ? `\n🎥 <i>Your full meeting video recording was delivered above!</i>`
+      : recordingInfo) +
     `\nThe assistant has finished the meeting. You can send another Zoom link anytime to start a new session!`,
     { parse_mode: 'HTML', link_preview_options: { is_disabled: false } },
   );
@@ -173,41 +192,46 @@ export async function handleStopConfirm(ctx: BotContext, meetingId: string): Pro
 
     const stopResult = await meetingService.stopMeeting(telegramUserId, meetingId);
     localRecordingPath = stopResult.recordingFilePath;
+    const databaseDownloadUrl = stopResult.downloadUrl;
+    const videoBuffer = stopResult.videoBuffer;
 
     await auditRepo.log({
       userId: user.id,
       action: 'MEETING_STOPPED_MANUALLY',
-      metadata: { meetingId, duration: durationStr },
+      metadata: { meetingId, duration: durationStr, downloadUrl: databaseDownloadUrl },
     }).catch(() => {});
-  } catch {
-    // DB error, continue
-  }
 
-  log.info({ meetingId, userId: user.id }, 'Meeting session stopped by user');
+    log.info({ meetingId, userId: user.id }, 'Meeting session stopped by user');
 
-  if (localRecordingPath && fs.existsSync(localRecordingPath)) {
-    const stats = fs.statSync(localRecordingPath);
-    if (stats.size > 0 && stats.size <= 50 * 1024 * 1024) {
+    const rawBytes = videoBuffer || (localRecordingPath && fs.existsSync(localRecordingPath) ? fs.readFileSync(localRecordingPath) : undefined);
+
+    if (rawBytes && rawBytes.length > 0 && rawBytes.length <= 50 * 1024 * 1024) {
       try {
-        await ctx.replyWithVideo(new InputFile(localRecordingPath), {
+        await ctx.replyWithVideo(new InputFile(rawBytes, `meeting-${meetingIdStr}.mp4`), {
           caption:
             `🎬 <b>Meeting Screen Recording</b>\n\n` +
             `📌 <b>Meeting ID:</b> <code>${meetingIdStr}</code>\n` +
             `⏱️ <b>Attended Duration:</b> <code>${durationStr}</code>\n` +
             `📹 <b>Format:</b> High Definition MP4 Video\n` +
+            `💾 <b>Saved to Database:</b> ✅ Stored Permanently\n` +
+            (databaseDownloadUrl ? `📥 <a href="${databaseDownloadUrl}">Direct Web Download Link</a>\n\n` : '\n') +
             `🤖 <i>Delivered instantly from meeting bot</i>`,
           parse_mode: 'HTML',
           supports_streaming: true,
         });
       } catch (uploadErr: any) {
         log.error({ error: uploadErr?.message }, 'Failed to upload video via callback');
-      } finally {
-        try {
-          fs.unlinkSync(localRecordingPath);
-        } catch {
-          // ignore
-        }
       }
+    }
+  } catch {
+    // DB error, continue
+  }
+
+  if (localRecordingPath && fs.existsSync(localRecordingPath)) {
+    try {
+      fs.unlinkSync(localRecordingPath);
+    } catch {
+      // ignore
     }
   }
 

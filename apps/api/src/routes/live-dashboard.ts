@@ -1,7 +1,32 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { meetingService } from '@zoom-assistant/orchestrator';
+import { recordingRepo } from '@zoom-assistant/database';
 
 export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
+  /**
+   * GET /api/recordings — List all recorded videos saved in PostgreSQL database
+   */
+  fastify.get('/api/recordings', async (_request, reply) => {
+    const list = await recordingRepo.listRecent(20);
+    return reply.send(list);
+  });
+
+  /**
+   * GET /api/recordings/:id/download — Stream / Download full MP4 video from database
+   */
+  fastify.get('/api/recordings/:id/download', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const rec = await recordingRepo.findById(id);
+    if (!rec) {
+      return reply.status(404).send({ error: 'RecordingNotFound', message: 'Video recording not found in database' });
+    }
+
+    reply.header('Content-Type', rec.mimeType || 'video/mp4');
+    reply.header('Content-Disposition', `inline; filename="${rec.fileName}"`);
+    reply.header('Content-Length', rec.fileSize);
+    return reply.send(rec.videoData);
+  });
+
   /**
    * GET /api/live/status — JSON status of current bot screen and session
    */
@@ -511,6 +536,12 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
           • The bot will join audio and begin recording automatically.<br>
           • Send <code>/stop</code> in Telegram at any time to receive the finalized MP4 recording.
         </div>
+      <!-- Saved Database Recordings Section -->
+      <div class="panel" style="grid-column: 1 / -1; margin-top: 10px;">
+        <h2>📼 Saved Video Recordings (Stored in PostgreSQL Database)</h2>
+        <div id="recordingsList" style="display: grid; gap: 10px; margin-top: 12px;">
+          <div style="color: var(--text-muted); font-size: 13px;">Loading recordings...</div>
+        </div>
       </div>
     </div>
   </div>
@@ -569,6 +600,36 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
       }
     }
 
+    async function loadRecordings() {
+      const container = document.getElementById('recordingsList');
+      if (!container) return;
+      try {
+        const res = await fetch('/api/recordings');
+        if (res.ok) {
+          const items = await res.json();
+          if (items.length === 0) {
+            container.innerHTML = '<div style="color: var(--text-muted); font-size: 13px;">No recorded meetings stored in database yet. Join and stop a meeting to view recordings here!</div>';
+            return;
+          }
+          container.innerHTML = items.map(function(item) {
+            var sizeMb = (item.fileSize / (1024 * 1024)).toFixed(2);
+            var recDate = new Date(item.createdAt).toLocaleString();
+            return '<div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--card-border); border-radius: 12px;">' +
+              '<div>' +
+                '<div style="font-weight: 600; font-size: 14px; color: #fff;">Zoom Meeting: <code>' + item.zoomMeetingId + '</code></div>' +
+                '<div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Size: ' + sizeMb + ' MB • Recorded: ' + recDate + '</div>' +
+              '</div>' +
+              '<div style="display: flex; gap: 10px;">' +
+                '<a href="/api/recordings/' + item.id + '/download" target="_blank" class="btn btn-primary" style="font-size: 12px; padding: 6px 12px;">▶️ Watch / Download</a>' +
+              '</div>' +
+            '</div>';
+          }).join('');
+        }
+      } catch (e) {
+        container.innerHTML = '<div style="color: var(--text-muted); font-size: 13px;">Could not load database recordings.</div>';
+      }
+    }
+
     // Auto-refresh loop every 1 second
     setInterval(() => {
       if (autoRefreshToggle.checked) {
@@ -577,7 +638,11 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
       }
     }, 1000);
 
+    // Refresh recordings list every 10 seconds
+    setInterval(loadRecordings, 10000);
+
     pollStatus();
+    loadRecordings();
   </script>
 </body>
 </html>

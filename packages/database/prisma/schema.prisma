@@ -69,10 +69,31 @@ model Meeting {
 
   user                   User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   botSessions            BotSession[]
+  recordings             MeetingRecording[]
 
   @@index([userId, status])
   @@index([status])
   @@map("meetings")
+}
+
+// ============================================================
+// Meeting recordings — persistent database video archive
+// ============================================================
+model MeetingRecording {
+  id              String   @id @default(cuid())
+  meetingId       String   @map("meeting_id")
+  zoomMeetingId   String   @map("zoom_meeting_id")
+  fileName        String   @map("file_name")
+  fileSize        Int      @map("file_size")
+  mimeType        String   @default("video/mp4") @map("mime_type")
+  videoData       Bytes    @map("video_data")
+  downloadUrl     String?  @map("download_url")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  meeting         Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  @@index([meetingId])
+  @@map("meeting_recordings")
 }
 
 // ============================================================

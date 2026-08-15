@@ -105,6 +105,21 @@ export async function initDatabaseSchema(): Promise<void> {
     );`,
     `CREATE INDEX IF NOT EXISTS "bot_sessions_meeting_id_idx" ON "bot_sessions"("meeting_id");`,
 
+    `CREATE TABLE IF NOT EXISTS "meeting_recordings" (
+      "id" TEXT NOT NULL,
+      "meeting_id" TEXT NOT NULL,
+      "zoom_meeting_id" TEXT NOT NULL,
+      "file_name" TEXT NOT NULL,
+      "file_size" INTEGER NOT NULL,
+      "mime_type" TEXT NOT NULL DEFAULT 'video/mp4',
+      "video_data" BYTEA NOT NULL,
+      "download_url" TEXT,
+      "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "meeting_recordings_pkey" PRIMARY KEY ("id"),
+      CONSTRAINT "meeting_recordings_meeting_id_fkey" FOREIGN KEY ("meeting_id") REFERENCES "meetings"("id") ON DELETE CASCADE ON UPDATE CASCADE
+    );`,
+    `CREATE INDEX IF NOT EXISTS "meeting_recordings_meeting_id_idx" ON "meeting_recordings"("meeting_id");`,
+
     `CREATE TABLE IF NOT EXISTS "oauth_states" (
       "state" TEXT NOT NULL,
       "telegram_user_id" BIGINT NOT NULL,

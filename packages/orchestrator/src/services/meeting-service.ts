@@ -1,7 +1,9 @@
+import fs from 'node:fs';
 import {
   userRepo,
   zoomAccountRepo,
   meetingRepo,
+  recordingRepo,
   auditRepo,
   type Meeting,
 } from '@zoom-assistant/database';
@@ -197,7 +199,7 @@ export class MeetingService {
     telegramUserId: bigint,
     meetingId: string,
     reason: string = 'USER_STOPPED',
-  ): Promise<{ meeting: Meeting; recordingFilePath?: string }> {
+  ): Promise<{ meeting: Meeting; recordingFilePath?: string; recordingId?: string; downloadUrl?: string; videoBuffer?: Buffer }> {
     const { user } = await this.validateUserAndAccount(telegramUserId);
 
     const meeting = await meetingRepo.findById(meetingId);
@@ -230,6 +232,37 @@ export class MeetingService {
       activeBrowserAdapters.delete(meetingId);
     }
 
+    // Save video recording into PostgreSQL database
+    let recordingId: string | undefined;
+    let downloadUrl: string | undefined;
+    let videoBuffer: Buffer | undefined;
+
+    if (recordingFilePath && fs.existsSync(recordingFilePath)) {
+      try {
+        const stats = fs.statSync(recordingFilePath);
+        if (stats.size > 0) {
+          videoBuffer = fs.readFileSync(recordingFilePath);
+          const fileName = `meeting-${meeting.zoomMeetingId}-${Date.now()}.mp4`;
+          const baseUrl = process.env['RENDER_EXTERNAL_URL'] || '';
+
+          const rec = await recordingRepo.saveRecording({
+            meetingId,
+            zoomMeetingId: meeting.zoomMeetingId,
+            fileName,
+            fileSize: stats.size,
+            mimeType: 'video/mp4',
+            videoData: videoBuffer,
+          });
+
+          recordingId = rec.id;
+          downloadUrl = baseUrl ? `${baseUrl}/api/recordings/${rec.id}/download` : `/api/recordings/${rec.id}/download`;
+          log.info({ recordingId, sizeBytes: stats.size }, '💾 Stored video recording permanently in PostgreSQL database');
+        }
+      } catch (dbSaveErr: any) {
+        log.warn({ error: dbSaveErr?.message }, 'Failed to persist video recording in database');
+      }
+    }
+
     // Update status to COMPLETED
     const updated = await meetingRepo.updateStatus(meetingId, 'COMPLETED');
 
@@ -247,11 +280,11 @@ export class MeetingService {
     await auditRepo.log({
       userId: user.id,
       action: 'MEETING_STOP_REQUESTED',
-      metadata: { meetingId, reason },
+      metadata: { meetingId, reason, recordingId },
     });
 
-    log.info({ meetingId, userId: user.id, recordingFilePath }, 'Meeting stop completed');
-    return { meeting: updated, recordingFilePath };
+    log.info({ meetingId, userId: user.id, recordingFilePath, recordingId, downloadUrl }, 'Meeting stop completed');
+    return { meeting: updated, recordingFilePath, recordingId, downloadUrl, videoBuffer };
   }
 
   /**
