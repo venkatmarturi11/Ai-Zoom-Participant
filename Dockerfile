@@ -16,7 +16,7 @@ COPY packages ./packages
 COPY apps ./apps
 
 # Install all dependencies including devDependencies for tsc build
-RUN npm install
+RUN npm install --include=dev
 
 # Generate Prisma Client & compile TypeScript workspace binaries
 RUN npm run db:generate

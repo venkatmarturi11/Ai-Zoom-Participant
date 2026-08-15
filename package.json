@@ -27,10 +27,13 @@
     "docker:dev": "docker compose -f docker-compose.dev.yml up -d",
     "docker:down": "docker compose -f docker-compose.dev.yml down"
   },
-  "devDependencies": {
+  "dependencies": {
     "typescript": "^5.5.0",
-    "vitest": "^2.0.0",
+    "prisma": "^5.17.0",
     "@types/node": "^20.14.0"
+  },
+  "devDependencies": {
+    "vitest": "^2.0.0"
   },
   "engines": {
     "node": ">=20.0.0"
