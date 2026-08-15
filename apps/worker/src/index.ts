@@ -1,9 +1,11 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { Worker } from 'bullmq';
 import { QUEUE_NAMES, createLogger } from '@zoom-assistant/shared';
 import { getRedisConnection, closeRedisConnection, queueProducers } from '@zoom-assistant/queue';
 import type { MeetingStartPayload, MeetingStopPayload, RecordingCheckPayload } from '@zoom-assistant/queue';
 import { decryptToken } from '@zoom-assistant/crypto';
-import { meetingRepo, zoomAccountRepo } from '@zoom-assistant/database';
+import { meetingRepo, zoomAccountRepo, userRepo } from '@zoom-assistant/database';
 import { getMeetingRecordings, getValidAccessToken } from '@zoom-assistant/zoom';
 import { WorkerManager } from './worker-manager.js';
 import type { MeetingWorkerConfig } from './worker-context.js';
@@ -51,6 +53,70 @@ async function sendTelegramMessage(chatId: string, text: string): Promise<void> 
     }
   } catch (err: any) {
     log.warn({ error: err?.message }, 'Telegram sendMessage request failed');
+  }
+}
+
+/**
+ * Sends a video file directly to a Telegram chat via multipart/form-data.
+ */
+async function sendTelegramVideo(chatId: string, videoPath: string, caption: string): Promise<boolean> {
+  const token = process.env['TELEGRAM_BOT_TOKEN']?.trim();
+  if (!token) {
+    log.warn('TELEGRAM_BOT_TOKEN not set; cannot deliver video recording');
+    return false;
+  }
+
+  if (!fs.existsSync(videoPath)) {
+    log.warn({ videoPath }, 'Video file does not exist for upload');
+    return false;
+  }
+
+  const stats = fs.statSync(videoPath);
+  if (stats.size === 0) {
+    log.warn({ videoPath }, 'Video file is empty (0 bytes); skipping upload');
+    return false;
+  }
+
+  // Telegram Bot API maximum file upload size is 50MB (52428800 bytes)
+  const MAX_TELEGRAM_SIZE = 50 * 1024 * 1024;
+  if (stats.size > MAX_TELEGRAM_SIZE) {
+    log.warn({ sizeBytes: stats.size, maxSize: MAX_TELEGRAM_SIZE }, 'Video file exceeds Telegram 50MB upload limit');
+    await sendTelegramMessage(
+      chatId,
+      `⚠️ <b>Meeting Screen Recording Ready</b>\n\n` +
+        `The recorded video file is ${(stats.size / (1024 * 1024)).toFixed(1)}MB, which exceeds Telegram's 50MB bot upload limit.\n` +
+        `Please check if Zoom Cloud Recording processed your video link above.`,
+    );
+    return false;
+  }
+
+  try {
+    log.info({ videoPath, sizeBytes: stats.size, chatId }, 'Uploading screen recording video to Telegram...');
+    const fileBuffer = fs.readFileSync(videoPath);
+    const blob = new Blob([fileBuffer], { type: 'video/mp4' });
+    const formData = new FormData();
+    formData.append('chat_id', chatId);
+    formData.append('caption', caption);
+    formData.append('parse_mode', 'HTML');
+    formData.append('supports_streaming', 'true');
+    formData.append('video', blob, path.basename(videoPath));
+
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendVideo`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      log.error({ status: res.status, body }, 'Failed to upload video to Telegram');
+      return false;
+    }
+
+    log.info({ videoPath, chatId }, '🎬 Successfully delivered meeting screen recording video to Telegram!');
+    return true;
+  } catch (err: any) {
+    log.error({ error: err?.message, videoPath }, 'Exception during Telegram video upload');
+    return false;
   }
 }
 
@@ -120,7 +186,47 @@ async function main() {
       log.info({ meetingId: payload.meetingId, jobId: job.id, name: job.name }, 'Processing meeting control job');
 
       if (job.name === 'MEETING_STOP') {
+        const worker = workerManager.getWorker(payload.meetingId);
+        let recordingFilePath: string | undefined;
+
+        if (worker?.adapter) {
+          try {
+            const status = await worker.adapter.getStatus();
+            recordingFilePath = status.details?.['recordingFilePath'] as string | undefined;
+          } catch {
+            // ignore
+          }
+        }
+
         await workerManager.stopWorker(payload.meetingId, payload.reason ?? 'STOP_REQUESTED');
+
+        // Deliver screen recording if captured
+        if (recordingFilePath && fs.existsSync(recordingFilePath)) {
+          try {
+            const user = await userRepo.findById(payload.userId);
+            if (user?.telegramUserId) {
+              const chatId = String(user.telegramUserId);
+              const caption =
+                `🎬 <b>Meeting Screen Recording</b>\n\n` +
+                `📌 <b>Meeting ID:</b> <code>${payload.zoomMeetingId}</code>\n` +
+                `📹 <b>Format:</b> High Definition MP4 Video\n` +
+                `🤖 <b>Status:</b> Captured directly by headless bot`;
+
+              await sendTelegramVideo(chatId, recordingFilePath, caption);
+            }
+          } catch (delivErr: any) {
+            log.warn({ error: delivErr?.message }, 'Failed to deliver screen recording to Telegram');
+          } finally {
+            try {
+              if (fs.existsSync(recordingFilePath)) {
+                fs.unlinkSync(recordingFilePath);
+                log.info({ recordingFilePath }, 'Cleaned up temporary screen recording file');
+              }
+            } catch {
+              // ignore
+            }
+          }
+        }
       }
     },
     { connection },

@@ -1,6 +1,6 @@
 import { WorkerStateMachine, type WorkerState } from './state/state-machine.js';
 import type { MeetingWorkerConfig, WorkerContext } from './worker-context.js';
-import { resolveCapability, createMeetingAdapter } from '@zoom-assistant/zoom';
+import { resolveCapability, createMeetingAdapter, type MeetingAdapter } from '@zoom-assistant/zoom';
 import { createLogger, LIMITS } from '@zoom-assistant/shared';
 
 const log = createLogger({ module: 'meeting-worker' });
@@ -28,6 +28,10 @@ export class MeetingWorker {
 
   public get isTerminal(): boolean {
     return this.context.stateMachine.isTerminal;
+  }
+
+  public get adapter(): MeetingAdapter | undefined {
+    return this.context.adapter;
   }
 
   /**

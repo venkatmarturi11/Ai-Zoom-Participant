@@ -45,6 +45,14 @@ export async function stopCommand(ctx: BotContext): Promise<void> {
     await meetingRepo.updateStatus(active.id, 'STOPPING');
     await meetingRepo.updateStatus(active.id, 'COMPLETED');
 
+    await queueProducers.enqueueMeetingStop({
+      meetingId: active.id,
+      userId: user.id,
+      zoomMeetingId: active.zoomMeetingId,
+      requestedAt: new Date().toISOString(),
+      reason: 'USER_STOPPED',
+    }).catch(() => {});
+
     await auditRepo.log({
       userId: user.id,
       action: 'MEETING_STOPPED_MANUALLY',
@@ -130,6 +138,14 @@ export async function handleStopConfirm(ctx: BotContext, meetingId: string): Pro
 
     await meetingRepo.updateStatus(meetingId, 'STOPPING');
     await meetingRepo.updateStatus(meetingId, 'COMPLETED');
+
+    await queueProducers.enqueueMeetingStop({
+      meetingId,
+      userId: user.id,
+      zoomMeetingId: meetingIdStr,
+      requestedAt: new Date().toISOString(),
+      reason: 'USER_STOPPED',
+    }).catch(() => {});
 
     await auditRepo.log({
       userId: user.id,

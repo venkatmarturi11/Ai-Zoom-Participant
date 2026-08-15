@@ -33,7 +33,8 @@ RUN apk add --no-cache \
     ca-certificates \
     ttf-freefont \
     openssl \
-    libc6-compat
+    libc6-compat \
+    ffmpeg
 
 WORKDIR /app
 

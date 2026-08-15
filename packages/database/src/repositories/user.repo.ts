@@ -8,6 +8,12 @@ export const userRepo = {
     });
   },
 
+  async findById(id: string): Promise<User | null> {
+    return getDb().user.findUnique({
+      where: { id },
+    });
+  },
+
   async upsert(telegramUserId: bigint, telegramUsername?: string): Promise<User> {
     return getDb().user.upsert({
       where: { telegramUserId },
