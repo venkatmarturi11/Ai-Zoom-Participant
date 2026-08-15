@@ -54,6 +54,7 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
   private page?: Page;
   private frameRecorder?: FrameRecorder;
   private recordingFilePath?: string;
+  private latestScreenshot?: Buffer;
   private isConnected = false;
   private isWaitingRoom = false;
   private isEnded = false;
@@ -65,6 +66,37 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
     private readonly passcode?: string,
     private readonly displayName: string = 'Meeting Assistant',
   ) {}
+
+  public getMeetingId(): string {
+    return this.meetingId;
+  }
+
+  public getDisplayName(): string {
+    return this.displayName;
+  }
+
+  public getLatestScreenshot(): Buffer | undefined {
+    return this.latestScreenshot;
+  }
+
+  public async captureScreenshot(): Promise<Buffer | undefined> {
+    if (this.page) {
+      try {
+        const buf = await this.page.screenshot({ type: 'jpeg', quality: 80 });
+        if (buf && buf.length > 0) {
+          this.latestScreenshot = buf as Buffer;
+          return this.latestScreenshot;
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return this.latestScreenshot;
+  }
+
+  public getFrameCount(): number {
+    return this.frameRecorder?.getFrameCount() ?? 0;
+  }
 
   public async initialize(): Promise<void> {
     log.info({ meetingId: this.meetingId, displayName: this.displayName }, 'Initializing Puppeteer Zoom Participant');
@@ -118,9 +150,12 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
         if (isStopped || !page) return;
         try {
           const buf = await page.screenshot({ type: 'jpeg', quality: 80 });
-          if (ffmpegProc && ffmpegProc.stdin && ffmpegProc.stdin.writable && buf && buf.length > 0) {
-            ffmpegProc.stdin.write(buf);
-            frameCount++;
+          if (buf && buf.length > 0) {
+            this.latestScreenshot = buf as Buffer;
+            if (ffmpegProc && ffmpegProc.stdin && ffmpegProc.stdin.writable) {
+              ffmpegProc.stdin.write(buf);
+              frameCount++;
+            }
           }
         } catch {
           // Frame skipped during navigation

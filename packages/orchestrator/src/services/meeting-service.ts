@@ -314,6 +314,52 @@ export class MeetingService {
 
     return { user, zoomAccount };
   }
+
+  /**
+   * Get latest live screen screenshot buffer from the active browser session.
+   */
+  public async getActiveMeetingScreenshot(meetingId?: string): Promise<Buffer | undefined> {
+    let adapter: PuppeteerZoomAdapter | undefined;
+    if (meetingId) {
+      adapter = activeBrowserAdapters.get(meetingId);
+    } else {
+      adapter = activeBrowserAdapters.values().next().value;
+    }
+    if (!adapter) return undefined;
+    return adapter.captureScreenshot();
+  }
+
+  /**
+   * Get live diagnostic status across active browser sessions.
+   */
+  public async getActiveLiveStatus(): Promise<{
+    active: boolean;
+    meetingId?: string;
+    zoomMeetingId?: string;
+    displayName?: string;
+    status?: string;
+    frameCount?: number;
+    hasScreenshot: boolean;
+    activeCount: number;
+  }> {
+    const entries = Array.from(activeBrowserAdapters.entries());
+    if (entries.length === 0) {
+      return { active: false, hasScreenshot: false, activeCount: 0 };
+    }
+    const [meetingId, adapter] = entries[0]!;
+    const status = await adapter.getStatus();
+    const screenshot = adapter.getLatestScreenshot();
+    return {
+      active: true,
+      meetingId,
+      zoomMeetingId: adapter.getMeetingId(),
+      displayName: adapter.getDisplayName(),
+      status: status.waitingRoom ? 'WAITING_ROOM' : status.connected ? 'CONNECTED' : status.meetingEnded ? 'ENDED' : 'CONNECTING',
+      frameCount: adapter.getFrameCount(),
+      hasScreenshot: Boolean(screenshot && screenshot.length > 0),
+      activeCount: entries.length,
+    };
+  }
 }
 
 export const meetingService = new MeetingService();
