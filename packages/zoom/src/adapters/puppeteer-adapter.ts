@@ -405,6 +405,7 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
             Boolean(document.querySelector('canvas')) ||
             Boolean(document.querySelector('#wc-container')) ||
             (text.includes('participants') && text.includes('leave')) ||
+            text.includes('joining meeting...');
           const url = window.location.href || '';
           const needsHuman = url.includes('signin') || url.includes('login') || text.includes('captcha') || text.includes('verify you are human') || text.includes('security check');
           return { inWaitingRoom, hasMeetingUI, needsHuman };
