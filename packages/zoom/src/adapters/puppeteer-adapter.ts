@@ -1,5 +1,6 @@
 import * as puppeteerCore from 'puppeteer-core';
 import type { Browser, Page } from 'puppeteer-core';
+import { PuppeteerScreenRecorder } from 'puppeteer-screen-recorder';
 import { addExtra } from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 
@@ -113,7 +114,6 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
   }
 
   private startFrameRecorder(page: Page, meetingId: string): FrameRecorder {
-    const ffmpegPath = getFfmpegExecutablePath() || 'ffmpeg';
     const recordingsDir = path.join(os.tmpdir(), 'zoom-recordings');
     if (!fs.existsSync(recordingsDir)) {
       fs.mkdirSync(recordingsDir, { recursive: true });
@@ -121,78 +121,53 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
     const outFile = path.join(recordingsDir, `meeting-${meetingId}-${Date.now()}.mp4`);
     this.recordingFilePath = outFile;
 
-    const FPS = 5;
-    const intervalMs = Math.floor(1000 / FPS);
+    const recorder = new PuppeteerScreenRecorder(page, {
+      fps: 10,
+      videoFrame: { width: 1280, height: 720 },
+      videoBitrate: 1000,
+      videoCodec: 'libx264',
+      videoFormat: 'mp4',
+      aspectRatio: '16:9',
+    });
+
+    // Start background screen recording
+    recorder.start(outFile).catch((err) => {
+      log.error({ error: err.message }, 'PuppeteerScreenRecorder failed to start');
+    });
+
+    log.info({ outFile }, '🎥 Started PuppeteerScreenRecorder');
+
     let frameCount = 0;
-    let screenshotInterval: NodeJS.Timeout | null = null;
     let isStopped = false;
 
-    const ffmpegArgs = [
-      '-y',
-      '-f', 'image2pipe',
-      '-vcodec', 'mjpeg',
-      '-r', String(FPS),
-      '-i', '-',
-      '-c:v', 'libx264',
-      '-preset', 'ultrafast',
-      '-tune', 'zerolatency',
-      '-movflags', '+faststart',
-      '-pix_fmt', 'yuv420p',
-      '-vf', 'scale=1280:720',
-      outFile,
-    ];
-
-    log.info({ ffmpegPath, outFile, fps: FPS }, '🎥 Starting direct screenshot-to-FFmpeg screen recorder');
-
-    let ffmpegProc: ChildProcess | null = null;
-    try {
-      ffmpegProc = spawn(ffmpegPath, ffmpegArgs);
-
-      ffmpegProc.on('error', (err) => {
-        log.warn({ error: err.message }, 'FFmpeg spawn error');
-      });
-
-      screenshotInterval = setInterval(async () => {
-        if (isStopped || !page) return;
-        try {
-          const buf = await page.screenshot({ type: 'jpeg', quality: 80 });
-          if (buf && buf.length > 0) {
-            this.latestScreenshot = buf as Buffer;
-            if (ffmpegProc && ffmpegProc.stdin && ffmpegProc.stdin.writable) {
-              ffmpegProc.stdin.write(buf);
-              frameCount++;
-            }
-          }
-        } catch {
-          // Frame skipped during navigation
+    // Lightweight interval just for updating the dashboard view (1 FPS)
+    let dashboardInterval: NodeJS.Timeout | null = setInterval(async () => {
+      if (isStopped || !page) return;
+      try {
+        const buf = await page.screenshot({ type: 'jpeg', quality: 50 });
+        if (buf && buf.length > 0) {
+          this.latestScreenshot = buf as Buffer;
+          frameCount++;
         }
-      }, intervalMs);
-    } catch (spawnErr: any) {
-      log.warn({ error: spawnErr?.message }, 'Failed to spawn FFmpeg process');
-    }
+      } catch {
+        // ignore navigation errors
+      }
+    }, 1000);
 
     const stop = async (): Promise<string | undefined> => {
       if (isStopped) return outFile;
       isStopped = true;
 
-      if (screenshotInterval) {
-        clearInterval(screenshotInterval);
-        screenshotInterval = null;
+      if (dashboardInterval) {
+        clearInterval(dashboardInterval);
+        dashboardInterval = null;
       }
 
-      if (ffmpegProc && ffmpegProc.stdin && ffmpegProc.stdin.writable) {
-        ffmpegProc.stdin.end();
-      }
-
-      await new Promise<void>((resolve) => {
-        if (!ffmpegProc || ffmpegProc.killed || ffmpegProc.exitCode !== null) return resolve();
-        ffmpegProc.on('close', () => resolve());
-        setTimeout(resolve, 8000);
-      });
+      await recorder.stop().catch(() => {});
 
       if (fs.existsSync(outFile)) {
         const stats = fs.statSync(outFile);
-        log.info({ outFile, sizeBytes: stats.size, frames: frameCount }, '🎥 Screen recording MP4 saved successfully');
+        log.info({ outFile, sizeBytes: stats.size }, '🎥 Screen recording MP4 saved successfully via PuppeteerScreenRecorder');
         return outFile;
       }
       return undefined;
