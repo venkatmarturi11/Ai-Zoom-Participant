@@ -6,8 +6,6 @@ import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 
 const puppeteer = addExtra(puppeteerCore as any);
 puppeteer.use(StealthPlugin());
-import { spawn, type ChildProcess } from 'node:child_process';
-import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -35,19 +33,6 @@ function getChromiumExecutablePath(): string {
     }
   }
   return '/usr/bin/chromium';
-}
-
-function getFfmpegExecutablePath(): string | undefined {
-  if (process.env['FFMPEG_PATH'] && fs.existsSync(process.env['FFMPEG_PATH'])) {
-    return process.env['FFMPEG_PATH'];
-  }
-  if (fs.existsSync('/usr/bin/ffmpeg')) {
-    return '/usr/bin/ffmpeg';
-  }
-  if (ffmpegInstaller && (ffmpegInstaller as any).path && fs.existsSync((ffmpegInstaller as any).path)) {
-    return (ffmpegInstaller as any).path;
-  }
-  return undefined;
 }
 
 interface FrameRecorder {
@@ -121,7 +106,7 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
     const outFile = path.join(recordingsDir, `meeting-${meetingId}-${Date.now()}.mp4`);
     this.recordingFilePath = outFile;
 
-    const recorder = new PuppeteerScreenRecorder(page, {
+    const recorder = new PuppeteerScreenRecorder(page as any, {
       fps: 10,
       videoFrame: { width: 1280, height: 720 },
       videoBitrate: 1000,
