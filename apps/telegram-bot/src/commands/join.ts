@@ -100,6 +100,16 @@ export async function handleMeetingLinkInput(ctx: BotContext): Promise<void> {
               reply_markup: meetingRecordId ? meetingActionsKeyboard(meetingRecordId) : undefined,
             },
           );
+        } else if (status === 'WAITING_ROOM') {
+          await ctx.api.editMessageText(
+            ctx.chat!.id,
+            initialStatusMsg.message_id,
+            `⏳ <b>Bot is in the Zoom Waiting Room</b>\n\n` +
+            `📌 <b>Meeting ID:</b> <code>${meeting.meetingId}</code>\n` +
+            `👤 <b>Display Name:</b> <code>${userDisplayName ?? 'Meeting Assistant'}</code>\n\n` +
+            `<i>Please ask the meeting host to admit <b>${userDisplayName ?? 'Meeting Assistant'}</b> to the meeting! The bot will automatically enter and start recording once admitted.</i>`,
+            { parse_mode: 'HTML' },
+          );
         } else if (status === 'FAILED') {
           await ctx.api.editMessageText(
             ctx.chat!.id,
@@ -190,6 +200,16 @@ export async function handlePasscodeInput(ctx: BotContext): Promise<void> {
               parse_mode: 'HTML',
               reply_markup: meetingRecordId ? meetingActionsKeyboard(meetingRecordId) : undefined,
             },
+          );
+        } else if (status === 'WAITING_ROOM') {
+          await ctx.api.editMessageText(
+            ctx.chat!.id,
+            initialStatusMsg.message_id,
+            `⏳ <b>Bot is in the Zoom Waiting Room</b>\n\n` +
+            `📌 <b>Meeting ID:</b> <code>${meetingId}</code>\n` +
+            `👤 <b>Display Name:</b> <code>${userDisplayName ?? 'Meeting Assistant'}</code>\n\n` +
+            `<i>Please ask the meeting host to admit <b>${userDisplayName ?? 'Meeting Assistant'}</b> to the meeting! The bot will automatically enter and start recording once admitted.</i>`,
+            { parse_mode: 'HTML' },
           );
         } else if (status === 'FAILED') {
           await ctx.api.editMessageText(

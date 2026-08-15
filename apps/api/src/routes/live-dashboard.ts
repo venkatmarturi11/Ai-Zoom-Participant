@@ -581,7 +581,7 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
     function initWebSocket() {
       if (ws) return;
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      ws = new WebSocket(`${protocol}//${window.location.host}/api/live/control`);
+      ws = new WebSocket(protocol + '//' + window.location.host + '/api/live/control');
       ws.onopen = () => console.log('WebSocket connected');
       ws.onclose = () => { console.log('WebSocket disconnected'); ws = null; };
     }

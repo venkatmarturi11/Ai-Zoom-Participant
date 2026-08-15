@@ -103,7 +103,14 @@ export class MeetingService {
       setImmediate(async () => {
         try {
           await adapter.initialize();
-          await adapter.connect();
+          await adapter.connect(async (status, detail) => {
+            if (status === 'WAITING_ROOM') {
+              await meetingRepo.updateStatus(meeting.id, 'WAITING_ROOM').catch(() => {});
+              if (params.onStatusChange) {
+                await params.onStatusChange('WAITING_ROOM', detail);
+              }
+            }
+          });
           await meetingRepo.updateStatus(meeting.id, 'CONNECTED');
           log.info({ meetingId: meeting.id }, '✅ Headless browser participant entered meeting room and started recording');
           if (params.onStatusChange) {

@@ -197,7 +197,9 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
     }
   }
 
-  public async connect(): Promise<void> {
+  public async connect(
+    onStatusCallback?: (status: 'CONNECTED' | 'FAILED' | 'WAITING_ROOM', detail?: string) => Promise<void> | void,
+  ): Promise<void> {
     log.info({ meetingId: this.meetingId, displayName: this.displayName }, 'Launching headless browser to join Zoom room...');
 
     if (
@@ -377,14 +379,14 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
         }, this.displayName, this.passcode).catch(() => false);
       };
 
-      // Attempt join up to 40 seconds (or longer if human interaction is needed)
+      // Attempt join up to 40 seconds (or longer if waiting room or human interaction is active)
       const checkStart = Date.now();
       let hasEnteredMeeting = false;
 
       while (true) {
         const elapsed = Date.now() - checkStart;
-        if (elapsed > 40000 && !this.needsHumanInteraction) {
-          break; // Timeout after 40s only if no human interaction is detected
+        if (elapsed > 40000 && !this.needsHumanInteraction && !this.isWaitingRoom) {
+          break; // Timeout after 40s only if no human interaction is detected and not in waiting room
         }
         if (elapsed > 600000) {
           break; // Hard timeout after 10 minutes regardless
@@ -395,7 +397,12 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
         const state = await this.page.evaluate(() => {
           const text = (document.body ? document.body.innerText || '' : '').toLowerCase();
           const inWaitingRoom =
-            text.includes('waiting room') || text.includes('will let you in') || text.includes('please wait');
+            text.includes('waiting room') ||
+            text.includes('will let you in') ||
+            text.includes('please wait') ||
+            text.includes('waiting for the host') ||
+            text.includes('host will let you in') ||
+            text.includes('let you in soon');
           const hasMeetingUI =
             Boolean(document.querySelector('.footer__leave-btn')) ||
             Boolean(document.querySelector('[aria-label*="leave" i]')) ||
@@ -421,12 +428,19 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
 
         if (state.hasMeetingUI) {
           hasEnteredMeeting = true;
+          this.isWaitingRoom = false;
           break;
         }
 
         if (state.inWaitingRoom) {
+          const wasWaiting = this.isWaitingRoom;
           this.isWaitingRoom = true;
-          log.info({ meetingId: this.meetingId }, '⏳ Bot is in the host waiting room — waiting for host to admit');
+          if (!wasWaiting) {
+            log.info({ meetingId: this.meetingId }, '⏳ Bot is in the host waiting room — waiting for host to admit');
+            if (onStatusCallback) {
+              await onStatusCallback('WAITING_ROOM', 'Bot is in the Zoom waiting room — host has not admitted it yet');
+            }
+          }
         }
 
         await new Promise((res) => setTimeout(res, 2500));
@@ -434,7 +448,7 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
 
       if (!hasEnteredMeeting) {
         const pageContent = await this.page.content().catch(() => '');
-        const stillInWaitingRoom = /waiting room|please wait|host will let you in/i.test(pageContent);
+        const stillInWaitingRoom = /waiting room|please wait|host will let you in|waiting for the host/i.test(pageContent);
         this.isWaitingRoom = stillInWaitingRoom;
         throw new Error(
           stillInWaitingRoom

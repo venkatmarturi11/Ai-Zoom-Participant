@@ -24,7 +24,7 @@ export class RtmsMediaAdapter implements MeetingAdapter {
     log.info({ meetingId: this.meetingId }, 'Authenticating RTMS media session');
   }
 
-  public async connect(): Promise<void> {
+  public async connect(_onStatusCallback?: (status: 'CONNECTED' | 'FAILED' | 'WAITING_ROOM', detail?: string) => Promise<void> | void): Promise<void> {
     log.info({ meetingId: this.meetingId }, 'Connecting RTMS media stream');
     this.isConnected = true;
   }
