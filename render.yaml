@@ -75,13 +75,18 @@ services:
   # 409 Conflict errors from two services polling the same bot token.
 
   # 3. Zoom Meeting Worker Daemon
+  #    Runs Puppeteer + headless Chromium to physically join Zoom meetings.
+  #    MUST use Docker runtime — Render's native Node runtime does NOT run this
+  #    repo's Dockerfile, so Chromium (installed via `apk add chromium` in the
+  #    Dockerfile) would never exist in the container under runtime: node.
   - type: worker
     name: Ai-Zoom-Participant-Worker
-    runtime: node
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: node apps/worker/dist/index.js
     region: singapore
     plan: starter
-    buildCommand: npm install && npm run db:generate && (npm run db:push || true) && npm run build
-    startCommand: node apps/worker/dist/index.js
     envVars: *sharedEnv
 
   # 4. BullMQ Scheduler & Server Recovery Daemon

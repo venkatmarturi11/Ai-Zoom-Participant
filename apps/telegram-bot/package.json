@@ -17,7 +17,9 @@
     "@zoom-assistant/database": "*",
     "@zoom-assistant/crypto": "*",
     "@zoom-assistant/meeting-parser": "*",
-    "@zoom-assistant/orchestrator": "*"
+    "@zoom-assistant/orchestrator": "*",
+    "@zoom-assistant/zoom": "*",
+    "@zoom-assistant/queue": "*"
   },
   "devDependencies": {
     "tsx": "^4.16.0"

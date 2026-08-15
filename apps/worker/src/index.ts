@@ -1,9 +1,10 @@
 import { Worker } from 'bullmq';
 import { QUEUE_NAMES, createLogger } from '@zoom-assistant/shared';
-import { getRedisConnection, closeRedisConnection } from '@zoom-assistant/queue';
-import type { MeetingStartPayload, MeetingStopPayload } from '@zoom-assistant/queue';
+import { getRedisConnection, closeRedisConnection, queueProducers } from '@zoom-assistant/queue';
+import type { MeetingStartPayload, MeetingStopPayload, RecordingCheckPayload } from '@zoom-assistant/queue';
 import { decryptToken } from '@zoom-assistant/crypto';
 import { meetingRepo, zoomAccountRepo } from '@zoom-assistant/database';
+import { getMeetingRecordings, getValidAccessToken } from '@zoom-assistant/zoom';
 import { WorkerManager } from './worker-manager.js';
 import type { MeetingWorkerConfig } from './worker-context.js';
 
@@ -15,6 +16,43 @@ export { ReconnectManager } from './monitoring/reconnect.js';
 export { Watchdog } from './monitoring/watchdog.js';
 
 const log = createLogger({ module: 'worker-daemon' });
+
+// Backoff schedule for RECORDING_CHECK retries: Zoom cloud recordings commonly
+// take anywhere from a few minutes to over an hour to finish processing.
+const RECORDING_CHECK_DELAYS_MS = [5, 10, 15, 30, 60].map((min) => min * 60 * 1000);
+const RECORDING_CHECK_MAX_ATTEMPTS = RECORDING_CHECK_DELAYS_MS.length;
+
+/**
+ * Sends a message to a Telegram chat directly via the Bot API HTTP endpoint.
+ * The worker daemon doesn't run a grammy Bot instance (that lives in apps/api),
+ * so a plain fetch call is the simplest way to deliver a notification from here.
+ */
+async function sendTelegramMessage(chatId: string, text: string): Promise<void> {
+  const token = process.env['TELEGRAM_BOT_TOKEN']?.trim();
+  if (!token) {
+    log.warn('TELEGRAM_BOT_TOKEN not set; cannot deliver recording notification');
+    return;
+  }
+
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        parse_mode: 'HTML',
+        link_preview_options: { is_disabled: false },
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      log.warn({ status: res.status, body }, 'Telegram sendMessage failed');
+    }
+  } catch (err: any) {
+    log.warn({ error: err?.message }, 'Telegram sendMessage request failed');
+  }
+}
 
 async function main() {
   log.info('Starting Zoom Meeting Worker Daemon...');
@@ -88,6 +126,60 @@ async function main() {
     { connection },
   );
 
+  // 3. Queue Worker for delayed recording-availability checks
+  const recordingWorker = new Worker<RecordingCheckPayload>(
+    QUEUE_NAMES.RECORDING_CHECK,
+    async (job) => {
+      const payload = job.data;
+      log.info({ meetingId: payload.meetingId, attempt: payload.attempt, jobId: job.id }, 'Processing RECORDING_CHECK job');
+
+      try {
+        const tokens = await getValidAccessToken(payload.userId).catch(() => null);
+        if (!tokens?.accessToken) {
+          log.warn({ meetingId: payload.meetingId }, 'No valid Zoom access token; abandoning recording check');
+          return;
+        }
+
+        const recordings = await getMeetingRecordings(payload.zoomMeetingId, tokens.accessToken);
+        const mp4Files = recordings?.recordingFiles.filter((f) => f.fileType === 'MP4') ?? [];
+
+        if (mp4Files.length > 0 || recordings?.shareUrl) {
+          const mainVideo = mp4Files[0];
+          const text =
+            `🎬 <b>Your meeting recording is ready!</b>\n\n` +
+            `📌 <b>Meeting ID:</b> <code>${payload.zoomMeetingId}</code>\n` +
+            (mainVideo?.playUrl ? `▶️ <a href="${mainVideo.playUrl}">Watch Recording Online</a>\n` : '') +
+            (mainVideo?.downloadUrl ? `💾 <a href="${mainVideo.downloadUrl}">Download MP4 Video</a>\n` : '') +
+            (!mainVideo && recordings?.shareUrl ? `🔗 <a href="${recordings.shareUrl}">View Meeting Recording</a>\n` : '');
+
+          await sendTelegramMessage(payload.telegramChatId, text);
+          log.info({ meetingId: payload.meetingId }, 'Recording delivered to user');
+          return;
+        }
+
+        // Not ready yet — re-enqueue with backoff, or give up gracefully.
+        if (payload.attempt < RECORDING_CHECK_MAX_ATTEMPTS) {
+          const nextDelay = RECORDING_CHECK_DELAYS_MS[payload.attempt]!;
+          await queueProducers.enqueueRecordingCheck({ ...payload, attempt: payload.attempt + 1 }, nextDelay);
+          log.info({ meetingId: payload.meetingId, nextAttempt: payload.attempt + 1 }, 'Recording not ready yet; rescheduled check');
+        } else {
+          await sendTelegramMessage(
+            payload.telegramChatId,
+            `📹 <b>Recording still processing</b>\n\n` +
+              `Meeting <code>${payload.zoomMeetingId}</code>'s cloud recording is taking longer than usual. ` +
+              `Please check your Zoom account's Cloud Recordings page directly — it should appear there once Zoom finishes processing it.`,
+          );
+          log.warn({ meetingId: payload.meetingId }, 'Recording check attempts exhausted; notified user to check manually');
+        }
+      } catch (err: any) {
+        log.error({ meetingId: payload.meetingId, error: err?.message }, 'Error during recording check');
+        throw err;
+      }
+    },
+    { connection },
+  );
+
+
   joinWorker.on('failed', (job, err) => {
     log.error({ jobId: job?.id, error: err.message }, 'MEETING_JOIN job failed');
   });
@@ -96,10 +188,15 @@ async function main() {
     log.error({ jobId: job?.id, error: err.message }, 'meeting:control job failed');
   });
 
+  recordingWorker.on('failed', (job, err) => {
+    log.error({ jobId: job?.id, error: err.message }, 'recording-check job failed');
+  });
+
   const shutdown = async (signal: string) => {
     log.info({ signal }, 'Shutdown signal received in worker daemon');
     await joinWorker.close();
     await controlWorker.close();
+    await recordingWorker.close();
     await workerManager.stopAllWorkers('DAEMON_SHUTDOWN');
     await closeRedisConnection();
     process.exit(0);

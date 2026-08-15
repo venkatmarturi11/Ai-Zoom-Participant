@@ -45,3 +45,13 @@ export interface TokenRefreshPayload {
   zoomUserId: string;
   requestedAt: string;
 }
+
+export interface RecordingCheckPayload {
+  meetingId: string;
+  userId: string;
+  zoomMeetingId: string;
+  telegramChatId: string;
+  requestedAt: string;
+  /** How many times we've already checked and found nothing yet. */
+  attempt: number;
+}

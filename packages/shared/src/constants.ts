@@ -103,4 +103,5 @@ export const QUEUE_NAMES = {
   MEETING_TIMEOUT: 'meeting-timeout',
   MEETING_CLEANUP: 'meeting-cleanup',
   TOKEN_REFRESH: 'token-refresh',
+  RECORDING_CHECK: 'recording-check',
 } as const;

@@ -1,5 +1,5 @@
-import { getMeetingJoinQueue, getMeetingControlQueue, getMeetingCleanupQueue } from './queues.js';
-import type { MeetingStartPayload, MeetingStopPayload, MeetingCleanupPayload } from './jobs.js';
+import { getMeetingJoinQueue, getMeetingControlQueue, getMeetingCleanupQueue, getRecordingCheckQueue } from './queues.js';
+import type { MeetingStartPayload, MeetingStopPayload, MeetingCleanupPayload, RecordingCheckPayload } from './jobs.js';
 import { createLogger } from '@zoom-assistant/shared';
 
 const log = createLogger({ module: 'queue-producer' });
@@ -101,6 +101,35 @@ export const queueProducers = {
     } catch (err: any) {
       log.warn({ error: err?.message }, 'Queue enqueue error (continuing)');
       return `local-clean-${payload.meetingId}`;
+    }
+  },
+
+  /**
+   * Enqueue a delayed check for Zoom's cloud recording being ready.
+   * Zoom typically takes several minutes to hours to finish processing a
+   * recording after a meeting ends, so this re-checks on a backoff schedule
+   * rather than assuming it's ready immediately after /stop.
+   */
+  async enqueueRecordingCheck(payload: RecordingCheckPayload, delayMs: number): Promise<string> {
+    if (!process.env['REDIS_URL']) {
+      log.info({ meetingId: payload.meetingId }, 'REDIS_URL not configured; skipping recording check enqueue');
+      return `local-recording-${payload.meetingId}`;
+    }
+
+    try {
+      const queue = getRecordingCheckQueue();
+      const jobId = `recording-check-${payload.meetingId}-${payload.attempt}`;
+
+      const job = await queue.add('RECORDING_CHECK', payload, {
+        jobId,
+        delay: delayMs,
+      });
+
+      log.info({ meetingId: payload.meetingId, attempt: payload.attempt, delayMs, jobId: job.id }, 'Enqueued RECORDING_CHECK job');
+      return job.id!;
+    } catch (err: any) {
+      log.warn({ error: err?.message }, 'Queue enqueue error (continuing)');
+      return `local-recording-${payload.meetingId}`;
     }
   },
 };

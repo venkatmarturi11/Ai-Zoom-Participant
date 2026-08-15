@@ -1,6 +1,7 @@
 import type { BotContext } from '../bot.js';
 import { userRepo, meetingRepo, auditRepo } from '@zoom-assistant/database';
 import { getMeetingRecordings, getValidAccessToken } from '@zoom-assistant/zoom';
+import { queueProducers } from '@zoom-assistant/queue';
 import { createLogger } from '@zoom-assistant/shared';
 
 const log = createLogger({ module: 'stop-command' });
@@ -72,7 +73,22 @@ export async function stopCommand(ctx: BotContext): Promise<void> {
           recordingInfo = `\n🎬 <b>Recording Link:</b> <a href="${recordings.shareUrl}">View Meeting Recording</a>\n`;
         }
       } else {
-        recordingInfo = `\n📹 <b>Zoom Cloud Recording:</b> <i>Processing on Zoom Cloud. If cloud recording was active in your Zoom room, it will appear in your Zoom Cloud Recordings once finished.</i>\n`;
+        recordingInfo = `\n📹 <b>Zoom Cloud Recording:</b> <i>Still processing on Zoom's servers — I'll message you here as soon as it's ready.</i>\n`;
+        try {
+          await queueProducers.enqueueRecordingCheck(
+            {
+              meetingId: active.id,
+              userId: user.id,
+              zoomMeetingId: active.zoomMeetingId,
+              telegramChatId: String(ctx.from!.id),
+              requestedAt: new Date().toISOString(),
+              attempt: 1,
+            },
+            5 * 60 * 1000, // first check 5 minutes after stop
+          );
+        } catch (enqueueErr: any) {
+          log.warn({ error: enqueueErr?.message }, 'Failed to enqueue recording check');
+        }
       }
     }
   } catch (recErr: any) {

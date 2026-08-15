@@ -4,6 +4,7 @@ export {
   getMeetingControlQueue,
   getMeetingCleanupQueue,
   getTokenRefreshQueue,
+  getRecordingCheckQueue,
 } from './queues.js';
 export {
   type MeetingJobType,
@@ -14,6 +15,7 @@ export {
   type MeetingCleanupPayload,
   type MeetingTimeoutPayload,
   type TokenRefreshPayload,
+  type RecordingCheckPayload,
 } from './jobs.js';
 export { queueProducers } from './producers.js';
 export { DistributedLock, type LockOptions } from './locks.js';

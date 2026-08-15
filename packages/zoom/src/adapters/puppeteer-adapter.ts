@@ -184,11 +184,38 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
         // ignore
       }
 
+      // Verify we actually made it into the meeting room before declaring success.
+      // Checks for the in-meeting toolbar/leave button; if it's not present, we're
+      // still stuck on an error screen, waiting room, or rejected-join screen.
+      const inMeeting = await this.page
+        .waitForSelector(
+          'button.footer__leave-btn, [aria-label="Leave"], .footer-button__leave-btn-container, #wc-footer',
+          { timeout: 15000 },
+        )
+        .then(() => true)
+        .catch(() => false);
+
+      if (!inMeeting) {
+        const pageContent = await this.page.content().catch(() => '');
+        const stillInWaitingRoom = /waiting room|please wait|host will let you in/i.test(pageContent);
+        this.isWaitingRoom = stillInWaitingRoom;
+        throw new Error(
+          stillInWaitingRoom
+            ? 'Bot is stuck in the Zoom waiting room — host has not admitted it'
+            : 'Could not confirm the bot actually entered the meeting (join may have failed silently)',
+        );
+      }
+
       this.isConnected = true;
       log.info({ meetingId: this.meetingId, displayName: this.displayName }, '✅ Headless bot successfully entered the Zoom meeting room!');
     } catch (err: any) {
       log.error({ meetingId: this.meetingId, error: err.message }, 'Puppeteer Zoom connection error');
-      this.isConnected = true;
+      this.isConnected = false;
+      // Clean up the browser we may have partially launched before failing.
+      await this.browser?.close().catch(() => {});
+      this.browser = undefined;
+      this.page = undefined;
+      throw err;
     }
   }
 
