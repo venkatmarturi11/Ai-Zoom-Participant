@@ -260,7 +260,7 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
     }, 2500);
   }
 
-  private async loginToZoom(): Promise<void> {
+  public async loginToZoom(): Promise<void> {
     if (!this.page) return;
 
     const email = process.env['ZOOM_BOT_EMAIL'];
@@ -397,8 +397,6 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
       for (const origin of zoomOrigins) {
         await context.overridePermissions(origin, ['microphone', 'camera']).catch(() => {});
       }
-
-      await this.loginToZoom();
 
       // Initialize screen recorder (optimized for ≤2 cores)
       this.frameRecorder = this.startFrameRecorder(this.page, this.meetingId);
