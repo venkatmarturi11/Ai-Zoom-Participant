@@ -124,7 +124,7 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
     // Return clean SVG placeholder when idle
     reply.type('image/svg+xml');
     const svg = `
-      <svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
+      <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
         <defs>
           <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
             <stop offset="0%" stop-color="#0a0e1a"/>
@@ -132,18 +132,18 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
           </linearGradient>
         </defs>
         <rect width="100%" height="100%" fill="url(#bg)"/>
-        <circle cx="320" cy="140" r="36" fill="#3b82f6" opacity="0.2"/>
-        <circle cx="320" cy="140" r="24" fill="#3b82f6" opacity="0.4"/>
-        <path d="M312 128 L334 140 L312 152 Z" fill="#60a5fa"/>
-        <text x="320" y="200" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="16" font-weight="700" fill="#f8fafc" text-anchor="middle">
-          Headless Browser is Ready
+        <circle cx="640" cy="300" r="48" fill="#3b82f6" opacity="0.2"/>
+        <circle cx="640" cy="300" r="32" fill="#3b82f6" opacity="0.4"/>
+        <path d="M632 284 L654 300 L632 316 Z" fill="#60a5fa"/>
+        <text x="640" y="380" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="22" font-weight="700" fill="#f8fafc" text-anchor="middle">
+          Headless Browser is Ready (1280×720 HD)
         </text>
-        <text x="320" y="225" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" fill="#94a3b8" text-anchor="middle">
+        <text x="640" y="415" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14" fill="#94a3b8" text-anchor="middle">
           Click "Launch Zoom Sign-In" below or send a Zoom link in Telegram!
         </text>
-        <rect x="230" y="250" width="180" height="28" rx="14" fill="#1e293b" stroke="#334155" stroke-width="1"/>
-        <circle cx="245" cy="264" r="4" fill="#10b981"/>
-        <text x="257" y="268" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="500" fill="#cbd5e1">
+        <rect x="520" y="450" width="240" height="36" rx="18" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+        <circle cx="545" cy="468" r="5" fill="#10b981"/>
+        <text x="560" y="473" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="500" fill="#cbd5e1">
           Interactive Control Ready
         </text>
       </svg>
@@ -427,7 +427,7 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
       <div class="screen-card">
         <div class="card-header">
           <div class="card-title">
-            <span>🖱️ Interactive Browser Screen (Click anywhere on screen to click)</span>
+            <span>🖱️ Interactive Browser Screen (1280×720 HD)</span>
             <span class="live-tag">LIVE</span>
             <span class="rec-tag" id="recBadge" style="display:none">● REC</span>
           </div>
@@ -565,8 +565,8 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
     screenImg.addEventListener('click', (e) => {
       e.preventDefault();
       const rect = screenImg.getBoundingClientRect();
-      const scaleX = 640 / rect.width;
-      const scaleY = 360 / rect.height;
+      const scaleX = 1280 / rect.width;
+      const scaleY = 720 / rect.height;
       const clickX = (e.clientX - rect.left) * scaleX;
       const clickY = (e.clientY - rect.top) * scaleY;
 

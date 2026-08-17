@@ -132,8 +132,8 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
       followNewTab: true,
       fps: 4,
       ffmpeg_Path: resolvedFfmpegPath,
-      videoFrame: { width: 640, height: 360 },
-      videoBitrate: 250,
+      videoFrame: { width: 1280, height: 720 },
+      videoBitrate: 350,
       videoCodec: 'libx264',
       videoFormat: 'mp4',
       aspectRatio: '16:9',
@@ -338,8 +338,8 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
           '--disable-blink-features=AutomationControlled',
           '--use-fake-ui-for-media-stream',
           '--autoplay-policy=no-user-gesture-required',
-          // ── Resource optimization for ≤2 cores ──
-          '--window-size=640,360',
+          // ── Optimized resolution for complete Zoom UI visibility ──
+          '--window-size=1280,720',
           '--use-gl=swiftshader',
           '--disable-gpu',
           '--disable-extensions',
@@ -358,7 +358,7 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
           // ── Audio capture support ──
           '--enable-features=AudioServiceOutOfProcess',
         ],
-        defaultViewport: { width: 640, height: 360 },
+        defaultViewport: { width: 1280, height: 720 },
       }) as unknown as Browser;
 
       this.page = await this.browser.newPage();
