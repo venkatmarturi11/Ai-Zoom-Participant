@@ -383,13 +383,22 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
       // Initialize screen recorder (optimized for ≤2 cores)
       this.frameRecorder = this.startFrameRecorder(this.page, this.meetingId);
 
-      // Construct direct Zoom Web Client join URL
-      const cleanMeetingId = String(this.meetingId).replace(/[\s-]/g, '');
+      // Construct direct Zoom Web Client join URL or Registration URL
+      const cleanMeetingId = String(this.meetingId).replace(/[\s]/g, '');
       const encodedName = encodeURIComponent(this.displayName);
       const encodedPwd = this.passcode ? encodeURIComponent(this.passcode) : '';
-      const joinUrl = `https://app.zoom.us/wc/${encodeURIComponent(cleanMeetingId)}/join?pwd=${encodedPwd}&uname=${encodedName}`;
 
-      log.info({ meetingId: this.meetingId, joinUrl: `https://app.zoom.us/wc/${cleanMeetingId}/join?pwd=...` }, 'Navigating to Zoom Web Client');
+      let joinUrl: string;
+      if (cleanMeetingId.startsWith('http://') || cleanMeetingId.startsWith('https://')) {
+        joinUrl = cleanMeetingId;
+      } else if (cleanMeetingId.includes('/') || cleanMeetingId.length > 15 || /[^0-9]/.test(cleanMeetingId)) {
+        // Registration token
+        joinUrl = `https://zoom.us/meeting/register/${cleanMeetingId}`;
+      } else {
+        joinUrl = `https://app.zoom.us/wc/${encodeURIComponent(cleanMeetingId)}/join?pwd=${encodedPwd}&uname=${encodedName}`;
+      }
+
+      log.info({ meetingId: this.meetingId, joinUrl }, 'Navigating to Zoom Web Client or Registration URL');
 
       await this.page.goto(joinUrl, { waitUntil: 'domcontentloaded', timeout: 35000 }).catch((err) => {
         log.warn({ error: err.message }, 'Initial page goto warning (proceeding)');

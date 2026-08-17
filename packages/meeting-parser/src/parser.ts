@@ -86,7 +86,7 @@ export function parseMeetingUrl(input: string): MeetingParseResult {
     return { success: false, error: 'This is not a Zoom meeting link. Please send a zoom.us URL.' };
   }
 
-  // Try standard meeting path: /j/{meetingId}
+  // Try standard meeting path: /j/{meetingId} or /w/{meetingId} or /s/{meetingId}
   const meetingMatch = MEETING_PATH_PATTERN.exec(url.pathname);
   if (meetingMatch?.[1]) {
     const meetingId = meetingMatch[1];
@@ -97,6 +97,21 @@ export function parseMeetingUrl(input: string): MeetingParseResult {
       meeting: {
         meetingId,
         passcode,
+        domain: url.hostname,
+        isVanityUrl: false,
+        originalUrl: trimmed,
+      },
+    };
+  }
+
+  // Try registration URL: /meeting/register/{token} or /webinar/register/{token}
+  const regMatch = /^\/(?:meeting|webinar)\/register\/([^/?#]+)/i.exec(url.pathname);
+  if (regMatch?.[1]) {
+    return {
+      success: true,
+      meeting: {
+        meetingId: regMatch[1],
+        passcode: url.searchParams.get('pwd') || null,
         domain: url.hostname,
         isVanityUrl: false,
         originalUrl: trimmed,
