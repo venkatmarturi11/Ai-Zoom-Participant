@@ -8,8 +8,10 @@ let prisma: PrismaClient | undefined;
  */
 export function getDb(): PrismaClient {
   if (!prisma) {
+    const dbUrl = process.env['DATABASE_URL'];
     prisma = new PrismaClient({
-      log: process.env['NODE_ENV'] === 'development' ? ['query', 'warn', 'error'] : ['error'],
+      datasourceUrl: dbUrl,
+      log: process.env['NODE_ENV'] === 'development' ? ['warn', 'error'] : ['error'],
     });
   }
   return prisma;
