@@ -149,11 +149,11 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
     let frameCount = 0;
     let isStopped = false;
 
-    // Lightweight interval for updating screenshots (every 20 seconds)
+    // Active interval for live dashboard screenshots (every 2 seconds)
     let dashboardInterval: NodeJS.Timeout | null = setInterval(async () => {
       if (isStopped || !page) return;
       try {
-        const buf = await page.screenshot({ type: 'jpeg', quality: 25 });
+        const buf = await page.screenshot({ type: 'jpeg', quality: 50 });
         if (buf && buf.length > 0) {
           this.latestScreenshot = buf as Buffer;
           frameCount++;
@@ -161,7 +161,7 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
       } catch {
         // ignore navigation errors
       }
-    }, 20000);
+    }, 2000);
 
     const stop = async (): Promise<string | undefined> => {
       if (isStopped) return outFile;
@@ -337,6 +337,7 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
           '--disable-dev-shm-usage',
           '--disable-blink-features=AutomationControlled',
           '--use-fake-ui-for-media-stream',
+          '--use-fake-device-for-media-stream',
           '--autoplay-policy=no-user-gesture-required',
           // ── Optimized resolution for complete Zoom UI visibility ──
           '--window-size=1280,720',
@@ -688,6 +689,16 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
         }
 
         await fillAndJoinMeeting();
+
+        // Native Puppeteer click on Join and Audio buttons
+        try {
+          const joinButtons = await this.page.$$(
+            '.preview-join-button, #joinBtn, button.zm-btn--primary, button[type="submit"], button.btn-join, button.join-audio-by-voip__join-btn',
+          );
+          for (const btn of joinButtons) {
+            await btn.click().catch(() => {});
+          }
+        } catch {}
 
         const state = await this.page
           .evaluate(() => {
