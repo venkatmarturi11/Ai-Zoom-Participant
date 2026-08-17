@@ -252,14 +252,31 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
   }
 
   private async loginToZoom(): Promise<void> {
+    if (!this.page) return;
+
+    // 1. Check if already logged in from persistent profile cookies
+    try {
+      await this.page.goto('https://zoom.us/profile', { waitUntil: 'domcontentloaded', timeout: 12000 });
+      const currentUrl = this.page.url();
+      if (!currentUrl.includes('signin') && !currentUrl.includes('login') && currentUrl.includes('profile')) {
+        log.info(
+          { meetingId: this.meetingId },
+          '✅ Bot is already logged into Zoom account permanently (persistent profile active)',
+        );
+        return;
+      }
+    } catch {}
+
+    // 2. Perform automated login if credentials are provided in .env
     const email = process.env['ZOOM_BOT_EMAIL'];
     const password = process.env['ZOOM_BOT_PASSWORD'];
 
-    if (!email || !password || !this.page) {
+    if (!email || !password) {
+      log.info({ meetingId: this.meetingId }, 'Using persistent browser profile session');
       return;
     }
 
-    log.info({ meetingId: this.meetingId }, 'Attempting to log into Zoom account...');
+    log.info({ meetingId: this.meetingId }, 'Logging into Zoom account and saving persistent session...');
     try {
       await this.page.goto('https://zoom.us/signin', { waitUntil: 'domcontentloaded', timeout: 30000 });
       await new Promise((res) => setTimeout(res, 2000));
@@ -268,25 +285,25 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
       const acceptCookies = await this.page.$('#onetrust-accept-btn-handler').catch(() => null);
       if (acceptCookies) await acceptCookies.click().catch(() => {});
 
-      await this.page.type('input[name="email"], input[type="email"], #email', email, { delay: 50 });
-      await this.page.type('input[name="password"], input[type="password"], #password', password, { delay: 50 });
-      
-      const submitBtn = await this.page.$('button[type="submit"], #js_btn_login');
+      await this.page.type('input[name="email"], input[type="email"], #email', email, { delay: 35 });
+      await this.page.type('input[name="password"], input[type="password"], #password', password, { delay: 35 });
+
+      const submitBtn = await this.page.$('button[type="submit"], #js_btn_login, .btn-primary');
       if (submitBtn) {
         await submitBtn.click();
-        log.info({ meetingId: this.meetingId }, 'Clicked login submit, waiting for navigation...');
+        log.info({ meetingId: this.meetingId }, 'Clicked login submit, waiting for persistent session establishment...');
         await this.page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
-        log.info({ meetingId: this.meetingId }, 'Zoom login attempt completed');
+        log.info({ meetingId: this.meetingId }, '✅ Zoom session saved permanently to Chrome profile');
       }
     } catch (err: any) {
-      log.warn({ error: err.message, meetingId: this.meetingId }, 'Zoom login attempt failed (CAPTCHA or timeout)');
+      log.warn({ error: err.message, meetingId: this.meetingId }, 'Zoom login attempt notice (proceeding)');
     }
   }
 
   public async connect(
     onStatusCallback?: (status: 'CONNECTED' | 'FAILED' | 'WAITING_ROOM' | 'NEEDS_HUMAN', detail?: string) => Promise<void> | void,
   ): Promise<void> {
-    log.info({ meetingId: this.meetingId, displayName: this.displayName }, 'Launching headless browser to join Zoom room...');
+    log.info({ meetingId: this.meetingId, displayName: this.displayName }, 'Launching browser with persistent profile to join Zoom room...');
 
     if (
       process.env['NODE_ENV'] === 'test' ||
@@ -302,11 +319,17 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
     }
 
     const executablePath = getChromiumExecutablePath();
-    log.info({ executablePath }, 'Using Chromium executable');
+    const profileDir =
+      process.env['PUPPETEER_USER_DATA_DIR'] || path.join(process.cwd(), '.data', 'chrome-profile');
+    if (!fs.existsSync(profileDir)) {
+      fs.mkdirSync(profileDir, { recursive: true });
+    }
+    log.info({ executablePath, profileDir }, 'Using Chromium executable with persistent profile');
 
     try {
       this.browser = await puppeteer.launch({
         executablePath,
+        userDataDir: profileDir,
         headless: true,
         args: [
           '--no-sandbox',
@@ -328,11 +351,9 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
           '--disable-hang-monitor',
           '--disable-popup-blocking',
           '--disable-prompt-on-repost',
-          '--disable-sync',
           '--disable-translate',
           '--metrics-recording-only',
           '--no-first-run',
-          '--single-process',               // Single process to save memory
           '--js-flags=--max-old-space-size=256', // Limit JS heap to 256MB
           // ── Audio capture support ──
           '--enable-features=AudioServiceOutOfProcess',
