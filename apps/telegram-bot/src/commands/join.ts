@@ -39,7 +39,6 @@ export async function handleMeetingLinkInput(ctx: BotContext): Promise<void> {
 
   // Try to extract a Zoom URL from the message (handles pasted invitation blocks)
   const url = extractZoomUrl(text) ?? text;
-
   const result = parseMeetingUrl(url);
 
   if (!result.success) {
@@ -48,20 +47,6 @@ export async function handleMeetingLinkInput(ctx: BotContext): Promise<void> {
   }
 
   const { meeting } = result;
-  const telegramUserId = BigInt(ctx.from!.id);
-
-  let user = await userRepo.findByTelegramId(telegramUserId).catch(() => null);
-  if (!user) {
-    user = await userRepo.upsert(telegramUserId, ctx.from?.username).catch(() => null);
-  }
-
-  // Automatically complete any prior active session so new session starts cleanly
-  if (user) {
-    const activeMeetings = await meetingRepo.findActiveByUserId(user.id).catch(() => []);
-    for (const oldMeeting of activeMeetings) {
-      await meetingRepo.updateStatus(oldMeeting.id, 'COMPLETED').catch(() => {});
-    }
-  }
 
   // If no passcode in URL, ask for it
   if (!meeting.passcode) {
@@ -72,7 +57,7 @@ export async function handleMeetingLinkInput(ctx: BotContext): Promise<void> {
     return;
   }
 
-  // Ready to join — execute the join flow
+  // Ready to join — execute the join flow immediately
   ctx.session.step = 'idle';
   await executeJoinFlow(ctx, meeting.meetingId, meeting.originalUrl, meeting.passcode);
 }
@@ -83,12 +68,6 @@ export async function handleMeetingLinkInput(ctx: BotContext): Promise<void> {
 export async function handlePasscodeInput(ctx: BotContext): Promise<void> {
   const text = ctx.message?.text?.trim();
   if (!text) return;
-
-  const telegramUserId = BigInt(ctx.from!.id);
-  let user = await userRepo.findByTelegramId(telegramUserId).catch(() => null);
-  if (!user) {
-    user = await userRepo.upsert(telegramUserId, ctx.from?.username).catch(() => null);
-  }
 
   const meetingId = ctx.session.pendingMeetingId;
   const meetingUrl = ctx.session.pendingMeetingUrl;
@@ -121,19 +100,30 @@ async function executeJoinFlow(
     ctx.from?.username ||
     'Meeting Assistant';
 
-  try {
-    const liveMonitorUrl =
-      process.env['RENDER_EXTERNAL_URL'] || `http://localhost:${process.env['API_PORT'] || 3000}`;
+  const liveMonitorUrl =
+    process.env['RENDER_EXTERNAL_URL'] || `http://localhost:${process.env['API_PORT'] || 3000}`;
 
-    // Step 1: Send user the login page + join links and live control button
-    const initialStatusMsg = await ctx.reply(
-      messages.botJoining(meetingId, userDisplayName),
-      {
-        parse_mode: 'HTML',
-        link_preview_options: { is_disabled: true },
-        reply_markup: liveControlKeyboard(liveMonitorUrl),
-      },
-    );
+  // Step 1: Send user the login page + direct join link + live screen button IMMEDIATELY (<50ms)
+  const initialStatusMsg = await ctx.reply(
+    messages.botJoining(meetingId, userDisplayName, meetingUrl),
+    {
+      parse_mode: 'HTML',
+      link_preview_options: { is_disabled: true },
+      reply_markup: liveControlKeyboard(liveMonitorUrl),
+    },
+  );
+
+  // Background user/session cleanup (non-blocking)
+  userRepo.findByTelegramId(telegramUserId).then(async (user) => {
+    if (user) {
+      const activeMeetings = await meetingRepo.findActiveByUserId(user.id).catch(() => []);
+      for (const oldMeeting of activeMeetings) {
+        await meetingRepo.updateStatus(oldMeeting.id, 'COMPLETED').catch(() => {});
+      }
+    }
+  }).catch(() => {});
+
+  try {
 
     // Step 2: Status callback — updates the user's message in real time
     const onStatusChange = async (

@@ -100,19 +100,18 @@ Meeting: ${topic ?? 'Active Meeting'}
 Duration: ${duration}`,
 
   // Shown when the bot is about to join a meeting
-  botJoining: (meetingId: string, displayName: string) =>
-    `🚀 <b>Joining Zoom Meeting</b>
+  botJoining: (meetingId: string, displayName: string, meetingUrl?: string) =>
+    `🚀 <b>Zoom Meeting Assistant</b>
 
 📌 <b>Meeting ID:</b> <code>${meetingId}</code>
 👤 <b>Display Name:</b> <code>${displayName}</code>
 
-⏳ Launching browser & connecting to meeting room...
+🔗 <b>Direct Links for You:</b>
+• <a href="${meetingUrl || `https://zoom.us/j/${meetingId}`}">👉 <b>Click here to Join Meeting Directly</b></a>
+• <a href="https://zoom.us/signin">👉 <b>Click here to Login to Zoom</b></a>
 
-<b>Useful links for you:</b>
-🔗 <a href="https://zoom.us/signin">Zoom Login Page</a>
-🔗 <a href="https://zoom.us/j/${meetingId}">Join Meeting on Your Device</a>
-
-<i>You can join the meeting on your own device too, or let the bot handle it alone.</i>`,
+🤖 <i>The bot is launching in background and recording the entire session.</i>
+<i>Tap the button below to view the bot's live screen!</i>`,
 
   botConnected: (meetingId: string, displayName: string) =>
     `✅ <b>Bot is IN the Zoom Meeting!</b>

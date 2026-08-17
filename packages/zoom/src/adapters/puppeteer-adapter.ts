@@ -206,7 +206,7 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
   }
 
   public async connect(
-    onStatusCallback?: (status: 'CONNECTED' | 'FAILED' | 'WAITING_ROOM', detail?: string) => Promise<void> | void,
+    onStatusCallback?: (status: 'CONNECTED' | 'FAILED' | 'WAITING_ROOM' | 'NEEDS_HUMAN', detail?: string) => Promise<void> | void,
   ): Promise<void> {
     log.info({ meetingId: this.meetingId, displayName: this.displayName }, 'Launching headless browser to join Zoom room...');
 
@@ -236,7 +236,6 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
           '--disable-dev-shm-usage',
           '--disable-blink-features=AutomationControlled',
           '--use-fake-ui-for-media-stream',
-          '--use-fake-device-for-media-stream',
           '--autoplay-policy=no-user-gesture-required',
           // ── Resource optimization for ≤2 cores ──
           '--window-size=640,360',
@@ -265,18 +264,40 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
 
       this.page = await this.browser.newPage();
 
-      // Mask automation signature
+      // Mask automation signature & spoof real media devices
       await this.page.setUserAgent(
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
       );
       await this.page.evaluateOnNewDocument(`
         Object.defineProperty(navigator, 'webdriver', { get: () => false });
+        window.navigator.chrome = { runtime: {}, app: {} };
+        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+
+        if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+          navigator.mediaDevices.enumerateDevices = async () => [
+            { deviceId: 'default', kind: 'audioinput', label: 'Microphone (Realtek High Definition Audio)', groupId: 'audio-g1' },
+            { deviceId: 'mic1', kind: 'audioinput', label: 'Microphone (Realtek High Definition Audio)', groupId: 'audio-g1' },
+            { deviceId: 'default', kind: 'audiooutput', label: 'Speakers (Realtek High Definition Audio)', groupId: 'audio-g1' },
+            { deviceId: 'cam1', kind: 'videoinput', label: 'HD Webcam (Integrated Camera)', groupId: 'video-g1' }
+          ];
+        }
       `);
 
-      // Grant microphone and camera permissions
+      // Grant microphone and camera permissions to all Zoom subdomains
       const context = this.browser.defaultBrowserContext();
-      await context.overridePermissions('https://app.zoom.us', ['microphone', 'camera']).catch(() => {});
-      await context.overridePermissions('https://pwa.zoom.us', ['microphone', 'camera']).catch(() => {});
+      const zoomOrigins = [
+        'https://app.zoom.us',
+        'https://pwa.zoom.us',
+        'https://zoom.us',
+        'https://us02web.zoom.us',
+        'https://us04web.zoom.us',
+        'https://us05web.zoom.us',
+        'https://us06web.zoom.us',
+      ];
+      for (const origin of zoomOrigins) {
+        await context.overridePermissions(origin, ['microphone', 'camera']).catch(() => {});
+      }
 
       // Attempt to log in if credentials are provided
       await this.loginToZoom();
