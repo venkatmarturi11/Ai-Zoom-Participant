@@ -60,6 +60,8 @@ services:
         sync: false
       - key: ENCRYPTION_KEY
         sync: false
+      - key: ADMIN_API_KEY
+        sync: false
       - key: DEFAULT_DISPLAY_NAME
         value: Meeting Assistant
       - key: DEFAULT_TIMEZONE
