@@ -179,20 +179,23 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
       } catch {}
 
       if (fs.existsSync(outFile) && fs.statSync(outFile).size > 0) {
-        // Apply faststart remux so the MP4 is 100% seekable (forward / backward scrubbing)
+        // Apply faststart remux with 1-second keyframe GOP so MP4 is 100% forward/backward scrubbable in all players
         const seekableFile = outFile.replace('.mp4', '-seekable.mp4');
         try {
           await execFileAsync(resolvedFfmpegPath, [
             '-y',
             '-i', outFile,
-            '-c', 'copy',
+            '-c:v', 'libx264',
+            '-preset', 'ultrafast',
+            '-pix_fmt', 'yuv420p',
+            '-g', '4',
             '-movflags', '+faststart',
             seekableFile,
           ]);
           if (fs.existsSync(seekableFile) && fs.statSync(seekableFile).size > 0) {
             fs.unlinkSync(outFile);
             fs.renameSync(seekableFile, outFile);
-            log.info({ outFile }, '🎥 Remuxed MP4 with faststart (seeking enabled)');
+            log.info({ outFile }, '🎥 Remuxed MP4 with 1s keyframes and faststart (forward/backward scrubbing enabled)');
           }
         } catch (remuxErr: any) {
           log.warn({ error: remuxErr?.message }, 'Faststart remux notice (original file preserved)');
@@ -316,7 +319,7 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
       this.browser = await puppeteer.launch({
         executablePath,
         userDataDir: profileDir,
-        headless: true,
+        headless: 'new' as any,
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
@@ -325,10 +328,10 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
           '--use-fake-ui-for-media-stream',
           '--use-fake-device-for-media-stream',
           '--autoplay-policy=no-user-gesture-required',
-          // ── Optimized resolution for complete Zoom UI visibility ──
+          // ── Optimized resolution and software compositor for Render Linux ──
           '--window-size=1280,720',
-          '--use-gl=swiftshader',
-          '--disable-gpu',
+          '--enable-software-rasterizer',
+          '--run-all-compositor-stages-before-draw',
           '--disable-extensions',
           '--disable-background-networking',
           '--disable-background-timer-throttling',
@@ -345,10 +348,11 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
           // ── Audio capture support ──
           '--enable-features=AudioServiceOutOfProcess',
         ],
-        defaultViewport: { width: 1280, height: 720 },
+        defaultViewport: { width: 1280, height: 720, deviceScaleFactor: 1 },
       }) as unknown as Browser;
 
       this.page = await this.browser.newPage();
+      await this.page.setViewport({ width: 1280, height: 720, deviceScaleFactor: 1 });
 
       // Mask automation signature & spoof real media devices
       await this.page.setUserAgent(
