@@ -675,14 +675,20 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
 
         await fillAndJoinMeeting();
 
-        // Native Puppeteer click on Join and Audio buttons
+        // Native Puppeteer click on Join and Audio buttons with trusted coordinates
         try {
-          const joinButtons = await this.page.$$(
-            '.preview-join-button, #joinBtn, button.zm-btn--primary, button[type="submit"], button.btn-join, button.join-audio-by-voip__join-btn',
+          const joinBtn = await this.page.$(
+            '.preview-join-button, button.preview-join-button, #joinBtn, button.zm-btn--primary, button[type="submit"], button.btn-join',
           );
-          for (const btn of joinButtons) {
-            await btn.click().catch(() => {});
+          if (joinBtn) {
+            const box = await joinBtn.boundingBox();
+            if (box) {
+              await this.page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+            } else {
+              await joinBtn.click().catch(() => {});
+            }
           }
+          await this.page.keyboard.press('Enter').catch(() => {});
         } catch {}
 
         const state = await this.page
