@@ -6,8 +6,6 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
 
   /**
    * Verify admin API key for programmer-only endpoints.
-   * Checks X-Admin-Key header or ?key= query parameter.
-   * If ADMIN_API_KEY is not set, all requests are allowed (dev mode).
    */
   function verifyAdminKey(request: any, reply: any): boolean {
     const adminKey = process.env['ADMIN_API_KEY']?.trim();
@@ -22,7 +20,7 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
 
     reply.status(403).send({
       error: 'Forbidden',
-      message: 'Invalid or missing admin API key. Recordings are programmer-only.',
+      message: 'Invalid or missing admin API key.',
     });
     return false;
   }
@@ -42,8 +40,15 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   /**
+   * POST /api/live/launch-login — Open interactive browser to Zoom Sign-in page for 1-time permanent login
+   */
+  fastify.post('/api/live/launch-login', async (_request, reply) => {
+    await meetingService.launchLoginSession();
+    return reply.send({ success: true, message: 'Zoom sign-in browser launched on live screen' });
+  });
+
+  /**
    * GET /api/recordings — List all recorded videos saved in PostgreSQL database
-   * 🔐 Requires admin API key (programmer-only)
    */
   fastify.get('/api/recordings', async (request, reply) => {
     if (!verifyAdminKey(request, reply)) return;
@@ -53,7 +58,6 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
 
   /**
    * GET /api/recordings/:id/download — Stream / Download full MP4 video from database
-   * 🔐 Requires admin API key (programmer-only) OR a valid download token
    */
   fastify.get('/api/recordings/:id/download', async (request, reply) => {
     if (!verifyAdminKey(request, reply)) return;
@@ -120,19 +124,19 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
           </linearGradient>
         </defs>
         <rect width="100%" height="100%" fill="url(#bg)"/>
-        <circle cx="320" cy="150" r="36" fill="#3b82f6" opacity="0.2"/>
-        <circle cx="320" cy="150" r="24" fill="#3b82f6" opacity="0.4"/>
-        <path d="M312 138 L334 150 L312 162 Z" fill="#60a5fa"/>
-        <text x="320" y="215" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="16" font-weight="600" fill="#f8fafc" text-anchor="middle">
-          Headless Browser is Idle
+        <circle cx="320" cy="140" r="36" fill="#3b82f6" opacity="0.2"/>
+        <circle cx="320" cy="140" r="24" fill="#3b82f6" opacity="0.4"/>
+        <path d="M312 128 L334 140 L312 152 Z" fill="#60a5fa"/>
+        <text x="320" y="200" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="16" font-weight="700" fill="#f8fafc" text-anchor="middle">
+          Headless Browser is Ready
         </text>
-        <text x="320" y="240" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" fill="#94a3b8" text-anchor="middle">
-          Send a Zoom link to Telegram Bot to join &amp; record live!
+        <text x="320" y="225" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" fill="#94a3b8" text-anchor="middle">
+          Click "Launch Zoom Sign-In" below or send a Zoom link in Telegram!
         </text>
-        <rect x="230" y="265" width="180" height="28" rx="14" fill="#1e293b" stroke="#334155" stroke-width="1"/>
-        <circle cx="245" cy="279" r="4" fill="#10b981"/>
-        <text x="257" y="283" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="500" fill="#cbd5e1">
-          Telegram Bot Online
+        <rect x="230" y="250" width="180" height="28" rx="14" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+        <circle cx="245" cy="264" r="4" fill="#10b981"/>
+        <text x="257" y="268" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="500" fill="#cbd5e1">
+          Interactive Control Ready
         </text>
       </svg>
     `;
@@ -140,9 +144,7 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   /**
-   * GET / — Live Visual Monitoring & Diagnostic Dashboard
-   * Full-screen live view of the headless browser with activity log,
-   * status indicators, and remote control. Mobile-friendly.
+   * GET / — Live Visual Monitoring & Full Remote Control Center
    */
   fastify.get('/', async (_request, reply) => {
     const html = `
@@ -151,15 +153,15 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Zoom Bot — Live Screen & Diagnostics</title>
+  <title>Zoom Bot — Live Screen & Interactive Remote Control</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     :root {
       --bg: #090d16;
-      --card: rgba(18, 26, 43, 0.85);
-      --border: rgba(255, 255, 255, 0.08);
+      --card: rgba(18, 26, 43, 0.9);
+      --border: rgba(255, 255, 255, 0.1);
       --blue: #3b82f6;
       --cyan: #06b6d4;
       --green: #10b981;
@@ -181,78 +183,75 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
     }
     .container {
       width: 100%;
-      max-width: 1320px;
+      max-width: 1360px;
       margin: 0 auto;
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      gap: 14px;
       flex: 1;
     }
     .header {
       display: flex; justify-content: space-between; align-items: center;
-      padding: 14px 20px;
+      padding: 12px 18px;
       background: var(--card);
       border: 1px solid var(--border);
-      border-radius: 16px;
+      border-radius: 14px;
       backdrop-filter: blur(12px);
     }
     .header-left { display: flex; align-items: center; gap: 12px; }
     .logo {
-      width: 40px; height: 40px; border-radius: 10px;
+      width: 38px; height: 38px; border-radius: 10px;
       background: linear-gradient(135deg, var(--blue), var(--cyan));
       display: flex; align-items: center; justify-content: center;
       font-size: 20px;
       box-shadow: 0 0 16px rgba(59,130,246,0.4);
     }
-    .header h1 { font-size: 17px; font-weight: 700; }
-    .header p { font-size: 12px; color: var(--muted); }
-    .header-right { display: flex; align-items: center; gap: 10px; }
+    .header h1 { font-size: 16px; font-weight: 700; }
+    .header p { font-size: 11px; color: var(--muted); }
+    .header-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
     .pill {
       display: flex; align-items: center; gap: 6px;
-      padding: 6px 14px; border-radius: 20px;
+      padding: 5px 12px; border-radius: 20px;
       font-size: 12px; font-weight: 600;
     }
     .pill-green { background: rgba(16,185,129,0.15); color: #34d399; border: 1px solid rgba(16,185,129,0.3); }
-    .pill-red { background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid rgba(239,68,68,0.3); }
-    .pill-yellow { background: rgba(245,158,11,0.15); color: #fbbf24; border: 1px solid rgba(245,158,11,0.3); }
-    .pill-blue { background: rgba(59,130,246,0.15); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3); }
     .dot { width: 8px; height: 8px; border-radius: 50%; animation: pulse 1.5s infinite; }
     .dot-green { background: var(--green); box-shadow: 0 0 8px var(--green); }
     @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.4;transform:scale(0.85)} }
 
     .grid {
       display: grid;
-      grid-template-columns: 1fr 360px;
-      gap: 16px;
+      grid-template-columns: 1fr 380px;
+      gap: 14px;
       flex: 1;
     }
-    @media (max-width: 960px) {
+    @media (max-width: 980px) {
       .grid { grid-template-columns: 1fr; }
     }
 
     .screen-card {
       background: var(--card);
       border: 1px solid var(--border);
-      border-radius: 18px;
+      border-radius: 16px;
       overflow: hidden;
       display: flex;
       flex-direction: column;
       box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
     }
     .card-header {
-      padding: 12px 18px;
+      padding: 10px 16px;
       border-bottom: 1px solid var(--border);
       display: flex; justify-content: space-between; align-items: center;
+      background: rgba(0, 0, 0, 0.2);
     }
     .card-title {
-      font-size: 14px; font-weight: 600;
+      font-size: 13px; font-weight: 600;
       display: flex; align-items: center; gap: 8px;
     }
     .live-tag {
       background: var(--red); color: white;
       font-size: 10px; font-weight: 800;
       padding: 2px 7px; border-radius: 4px;
-      letter-spacing: 0.05em;
       animation: pulse 1.2s infinite;
     }
     .rec-tag {
@@ -268,105 +267,163 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
       aspect-ratio: 16 / 9;
       display: flex; align-items: center; justify-content: center;
       overflow: hidden;
+      user-select: none;
     }
     .screen-image {
       width: 100%; height: 100%; object-fit: contain; display: block;
+      cursor: crosshair;
     }
+    .click-indicator {
+      position: absolute;
+      width: 22px; height: 22px;
+      border-radius: 50%;
+      border: 2px solid #60a5fa;
+      background: rgba(96, 165, 250, 0.4);
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      animation: clickRipple 0.6s ease-out forwards;
+    }
+    @keyframes clickRipple {
+      0% { transform: translate(-50%, -50%) scale(0.4); opacity: 1; }
+      100% { transform: translate(-50%, -50%) scale(2.2); opacity: 0; }
+    }
+
     .screen-overlay {
-      position: absolute; bottom: 12px; left: 12px;
-      background: rgba(0, 0, 0, 0.75);
+      position: absolute; bottom: 8px; left: 8px;
+      background: rgba(0, 0, 0, 0.8);
       backdrop-filter: blur(10px);
-      padding: 6px 12px; border-radius: 8px;
-      font-size: 11px; font-family: var(--mono);
+      padding: 4px 10px; border-radius: 6px;
+      font-size: 10px; font-family: var(--mono);
       color: #93c5fd;
-      display: flex; gap: 12px;
+      display: flex; gap: 10px;
       border: 1px solid rgba(255, 255, 255, 0.1);
+      pointer-events: none;
     }
+
+    /* Interactive Control Toolbar */
+    .control-toolbar {
+      padding: 12px 16px;
+      background: rgba(0, 0, 0, 0.3);
+      border-top: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .input-bar {
+      display: flex; gap: 8px;
+    }
+    .text-input {
+      flex: 1;
+      padding: 8px 12px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: #fff;
+      font-family: var(--mono);
+      font-size: 13px;
+      outline: none;
+      transition: border 0.2s;
+    }
+    .text-input:focus {
+      border-color: var(--blue);
+      box-shadow: 0 0 10px rgba(59, 130, 246, 0.3);
+    }
+    .btn-keys {
+      display: flex; gap: 6px; flex-wrap: wrap;
+    }
+
     .btn {
       padding: 6px 14px; border-radius: 8px; font-size: 12px; font-weight: 600;
       cursor: pointer; border: none; transition: all 0.2s ease;
-      display: inline-flex; align-items: center; gap: 6px;
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px;
       text-decoration: none; font-family: 'Inter', sans-serif;
     }
     .btn-primary { background: linear-gradient(135deg, #2563eb, #3b82f6); color: #fff; }
+    .btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
     .btn-secondary { background: rgba(255, 255, 255, 0.06); color: var(--text); border: 1px solid var(--border); }
     .btn-secondary:hover { background: rgba(255, 255, 255, 0.12); }
-    .btn-warning { background: var(--yellow); color: #000; font-weight: 700; }
+    .btn-warning { background: linear-gradient(135deg, #d97706, #f59e0b); color: #000; font-weight: 700; }
+    .btn-success { background: linear-gradient(135deg, #059669, #10b981); color: #fff; }
+    .btn-key {
+      padding: 5px 10px; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 6px; font-size: 11px; font-family: var(--mono); color: #cbd5e1; cursor: pointer;
+    }
+    .btn-key:hover { background: rgba(255, 255, 255, 0.18); color: #fff; }
 
     .sidebar {
-      display: flex; flex-direction: column; gap: 16px;
+      display: flex; flex-direction: column; gap: 14px;
     }
     .panel {
       background: var(--card);
       border: 1px solid var(--border);
-      border-radius: 18px;
-      padding: 16px;
+      border-radius: 16px;
+      padding: 14px;
       box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
     }
     .panel h2 {
-      font-size: 14px; font-weight: 700; margin-bottom: 12px;
+      font-size: 13px; font-weight: 700; margin-bottom: 10px;
       display: flex; align-items: center; gap: 8px;
     }
     .stat-row {
       display: flex; justify-content: space-between; align-items: center;
-      padding: 8px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-      font-size: 12px;
+      padding: 6px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      font-size: 11px;
     }
     .stat-row:last-child { border-bottom: none; }
     .stat-label { color: var(--muted); }
-    .stat-value { font-family: var(--mono); font-weight: 600; color: #fff; font-size: 12px; }
+    .stat-value { font-family: var(--mono); font-weight: 600; color: #fff; font-size: 11px; }
 
     .log-panel {
-      max-height: 220px; overflow-y: auto;
-      display: flex; flex-direction: column; gap: 6px;
+      max-height: 180px; overflow-y: auto;
+      display: flex; flex-direction: column; gap: 5px;
       font-size: 11px;
     }
     .log-item {
-      padding: 6px 10px; background: rgba(255,255,255,0.02);
+      padding: 5px 8px; background: rgba(255,255,255,0.02);
       border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);
-      display: flex; gap: 8px; align-items: flex-start;
+      display: flex; gap: 6px; align-items: flex-start;
       line-height: 1.35;
     }
-    .log-time { color: var(--muted); font-family: var(--mono); font-size: 10px; white-space: nowrap; }
+    .log-time { color: var(--muted); font-family: var(--mono); font-size: 9px; white-space: nowrap; }
 
     .help-box {
       background: linear-gradient(135deg, rgba(30, 41, 59, 0.6), rgba(15, 23, 42, 0.8));
       border: 1px solid rgba(59, 130, 246, 0.2);
-      border-radius: 12px; padding: 12px; font-size: 12px; line-height: 1.45; color: #cbd5e1;
+      border-radius: 10px; padding: 10px; font-size: 11px; line-height: 1.45; color: #cbd5e1;
     }
-    .help-box strong { color: #93c5fd; display: block; margin-bottom: 4px; }
+    .help-box strong { color: #93c5fd; display: block; margin-bottom: 3px; }
   </style>
 </head>
 <body>
   <div class="container">
     <div class="header">
       <div class="header-left">
-        <div class="logo">🎥</div>
+        <div class="logo">🎮</div>
         <div>
-          <h1>Zoom Bot Monitor</h1>
-          <p>Real-Time Visual Screencast &amp; Activity Log</p>
+          <h1>Zoom Bot Remote Control</h1>
+          <p>Click, Type &amp; Manage Browser in Real Time</p>
         </div>
       </div>
       <div class="header-right">
         <div class="pill pill-green" id="headerPill">
           <div class="dot dot-green"></div>
-          <span id="headerStatusText">Service Active</span>
+          <span id="headerStatusText">Control Active</span>
         </div>
-        <button class="btn btn-secondary" onclick="forceCapture()">📸 Capture Now</button>
+        <button class="btn btn-primary" onclick="launchLoginSession()">🔐 Launch Zoom Sign-In</button>
+        <button class="btn btn-secondary" onclick="forceCapture()">📸 Capture</button>
       </div>
     </div>
 
     <div class="grid">
-      <!-- Main Visual Screen -->
+      <!-- Main Visual Screen & Interactive Viewport -->
       <div class="screen-card">
         <div class="card-header">
           <div class="card-title">
-            <span>📺 Headless Browser Display (640×360)</span>
+            <span>🖱️ Interactive Browser Screen (Click anywhere on screen to click)</span>
             <span class="live-tag">LIVE</span>
             <span class="rec-tag" id="recBadge" style="display:none">● REC</span>
           </div>
           <div style="display: flex; gap: 8px; align-items: center;">
-            <button id="takeControlBtn" class="btn btn-warning" style="display: none;" onclick="toggleControl()">⚠️ Take Control</button>
             <button class="btn btn-secondary" id="pauseBtn" onclick="togglePause()">⏸ Pause</button>
           </div>
         </div>
@@ -379,6 +436,24 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
             <span id="lastUpdateOverlay">Updated: Just now</span>
           </div>
         </div>
+
+        <!-- Interactive Remote Keyboard & Mouse Toolbar -->
+        <div class="control-toolbar">
+          <div class="input-bar">
+            <input type="text" id="typeTextInput" class="text-input" placeholder="Type text here & press Enter or Send (Email, Password, OTP)..." onkeydown="if(event.key==='Enter') sendTypedText()">
+            <button class="btn btn-primary" onclick="sendTypedText()">⌨️ Send Text</button>
+          </div>
+
+          <div class="btn-keys">
+            <button class="btn-key" onclick="sendKey('Tab')">⇥ Tab</button>
+            <button class="btn-key" onclick="sendKey('Enter')">↵ Enter</button>
+            <button class="btn-key" onclick="sendKey('Backspace')">⌫ Backspace</button>
+            <button class="btn-key" onclick="sendKey('Space')">Space</button>
+            <button class="btn-key" onclick="sendScroll(350)">⬇️ Scroll Down</button>
+            <button class="btn-key" onclick="sendScroll(-350)">⬆️ Scroll Up</button>
+            <button class="btn-key" onclick="navigateToUrl('https://zoom.us/signin')">🔐 Go to Zoom Login</button>
+          </div>
+        </div>
       </div>
 
       <!-- Sidebar -->
@@ -387,7 +462,7 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
           <h2>📊 Live Session State</h2>
           <div class="stat-row">
             <span class="stat-label">Bot Status</span>
-            <span class="stat-value" id="statusVal" style="color: #34d399">IDLE</span>
+            <span class="stat-value" id="statusVal" style="color: #34d399">READY</span>
           </div>
           <div class="stat-row">
             <span class="stat-label">Meeting ID</span>
@@ -417,17 +492,16 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
           <div class="log-panel" id="logList">
             <div class="log-item">
               <span class="log-time">${new Date().toLocaleTimeString()}</span>
-              <span>🟢 Monitoring dashboard initialized. Ready for Zoom sessions.</span>
+              <span>🟢 Interactive control center ready. Click screen or type above.</span>
             </div>
           </div>
         </div>
 
         <div class="help-box">
-          <strong>💡 How it works:</strong>
-          1. Send a Zoom link in Telegram.<br>
-          2. The bot joins and records everything.<br>
-          3. Watch the live screen above in real-time.<br>
-          4. Send <code>/stop</code> in Telegram to save video.
+          <strong>🖱️ How to Interact:</strong>
+          • <strong>Click anywhere on the screen</strong> to click buttons, inputs, or CAPTCHA checkmarks.<br>
+          • <strong>Type into the text bar</strong> and click "Send Text" to type email/passwords.<br>
+          • <strong>Click "Launch Zoom Sign-In"</strong> to sign in once permanently!
         </div>
       </div>
     </div>
@@ -443,9 +517,9 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
 
   <script>
     const screenImg = document.getElementById('liveScreen');
+    const screenContainer = document.getElementById('screenContainer');
     const logList = document.getElementById('logList');
     let autoRefresh = true;
-    let isControlling = false;
     let ws = null;
     let lastState = 'IDLE';
     let sessionStartTime = null;
@@ -459,6 +533,83 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
       while (logList.children.length > 30) logList.removeChild(logList.lastChild);
     }
 
+    function initWebSocket() {
+      if (ws && ws.readyState === 1) return;
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      ws = new WebSocket(protocol + '//' + window.location.host + '/api/live/control');
+      ws.onopen = () => addLog('🔗', 'Interactive remote control stream connected');
+      ws.onclose = () => { setTimeout(initWebSocket, 2000); };
+    }
+
+    function sendWs(evt) {
+      initWebSocket();
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify(evt));
+      }
+    }
+
+    // Direct Click on screen image
+    screenImg.addEventListener('click', (e) => {
+      e.preventDefault();
+      const rect = screenImg.getBoundingClientRect();
+      const scaleX = 640 / rect.width;
+      const scaleY = 360 / rect.height;
+      const clickX = (e.clientX - rect.left) * scaleX;
+      const clickY = (e.clientY - rect.top) * scaleY;
+
+      // Show visual click indicator
+      const ripple = document.createElement('div');
+      ripple.className = 'click-indicator';
+      ripple.style.left = (e.clientX - screenContainer.getBoundingClientRect().left) + 'px';
+      ripple.style.top = (e.clientY - screenContainer.getBoundingClientRect().top) + 'px';
+      screenContainer.appendChild(ripple);
+      setTimeout(() => ripple.remove(), 700);
+
+      sendWs({ type: 'click', x: clickX, y: clickY });
+      addLog('🖱️', 'Clicked at (' + Math.round(clickX) + ', ' + Math.round(clickY) + ')');
+
+      // Request quick refresh
+      setTimeout(forceCapture, 400);
+    });
+
+    function sendTypedText() {
+      const input = document.getElementById('typeTextInput');
+      const text = input.value;
+      if (!text) return;
+      sendWs({ type: 'type', text: text });
+      addLog('⌨️', 'Typed text: "' + text.replace(/./g, '*') + '"');
+      input.value = '';
+      setTimeout(forceCapture, 500);
+    }
+
+    function sendKey(key) {
+      sendWs({ type: 'press', key: key });
+      addLog('⌨️', 'Pressed key: [' + key + ']');
+      setTimeout(forceCapture, 500);
+    }
+
+    function sendScroll(deltaY) {
+      sendWs({ type: 'scroll', deltaY: deltaY });
+      addLog('📜', 'Scrolled ' + (deltaY > 0 ? 'down' : 'up'));
+      setTimeout(forceCapture, 400);
+    }
+
+    function navigateToUrl(url) {
+      sendWs({ type: 'goto', url: url });
+      addLog('🌐', 'Navigated to ' + url);
+      setTimeout(forceCapture, 1500);
+    }
+
+    async function launchLoginSession() {
+      addLog('🚀', 'Launching interactive Zoom sign-in browser session...');
+      try {
+        await fetch('/api/live/launch-login', { method: 'POST' });
+        setTimeout(forceCapture, 1500);
+      } catch (err) {
+        addLog('❌', 'Failed to launch login session');
+      }
+    }
+
     function refreshScreen() {
       if (!autoRefresh) return;
       const t = Date.now();
@@ -467,26 +618,19 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     async function forceCapture() {
-      addLog('📸', 'Capturing fresh screenshot on demand...');
       try {
         const res = await fetch('/api/live/screenshot', { method: 'POST' });
         if (res.ok) {
           const blob = await res.blob();
           screenImg.src = URL.createObjectURL(blob);
           document.getElementById('lastUpdateOverlay').textContent = 'Updated: ' + new Date().toLocaleTimeString();
-          addLog('✅', 'Fresh screenshot captured');
-        } else {
-          addLog('⚠️', 'No active browser session');
         }
-      } catch {
-        addLog('❌', 'Screenshot capture failed');
-      }
+      } catch {}
     }
 
     function togglePause() {
       autoRefresh = !autoRefresh;
       document.getElementById('pauseBtn').textContent = autoRefresh ? '⏸ Pause' : '▶ Resume';
-      addLog(autoRefresh ? '▶️' : '⏸️', autoRefresh ? 'Screen stream resumed' : 'Screen stream paused');
     }
 
     async function pollStatus() {
@@ -497,7 +641,6 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
 
         const statusVal = document.getElementById('statusVal');
         const recBadge = document.getElementById('recBadge');
-        const takeControlBtn = document.getElementById('takeControlBtn');
 
         if (d.active) {
           if (!sessionStartTime) sessionStartTime = Date.now();
@@ -524,21 +667,12 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
           } else if (d.status === 'WAITING_ROOM') {
             statusVal.textContent = 'WAITING ROOM';
             statusVal.style.color = '#fbbf24';
-            if (lastState !== 'WAITING_ROOM') addLog('⏳', 'Bot is waiting in the host waiting room. Host must click Admit.');
+            if (lastState !== 'WAITING_ROOM') addLog('⏳', 'Bot is waiting in the host waiting room.');
           } else {
-            statusVal.textContent = 'CONNECTING';
+            statusVal.textContent = 'CONNECTING / ACTIVE';
             statusVal.style.color = '#60a5fa';
-            if (lastState !== 'CONNECTING') addLog('🔄', 'Launching headless browser and navigating to Zoom meeting...');
           }
-
-          if (d.needsHumanInteraction && !isControlling) {
-            takeControlBtn.style.display = 'inline-flex';
-            if (lastState !== 'NEEDS_HELP') addLog('🚨', 'Bot encountered CAPTCHA or Login check! Click "Take Control" to assist.');
-            lastState = 'NEEDS_HELP';
-          } else {
-            if (!isControlling) takeControlBtn.style.display = 'none';
-            lastState = d.status;
-          }
+          lastState = d.status;
         } else {
           sessionStartTime = null;
           document.getElementById('meetingIdVal').textContent = '—';
@@ -547,16 +681,11 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
           document.getElementById('framesOverlay').textContent = 'Frames: 0';
           document.getElementById('durationVal').textContent = '00:00:00';
           document.getElementById('durationOverlay').textContent = 'Elapsed: 00:00:00';
-          statusVal.textContent = 'IDLE';
-          statusVal.style.color = '#94a3b8';
+          statusVal.textContent = 'READY';
+          statusVal.style.color = '#34d399';
           document.getElementById('recorderStatusVal').textContent = 'Ready';
           document.getElementById('recorderStatusVal').style.color = '#94a3b8';
           recBadge.style.display = 'none';
-          takeControlBtn.style.display = 'none';
-
-          if (lastState && lastState !== 'IDLE') {
-            addLog('🔴', 'Meeting session ended. Recording saved to database.');
-          }
           lastState = 'IDLE';
         }
       } catch {}
@@ -592,47 +721,9 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
       }
     }
 
-    function initWebSocket() {
-      if (ws) return;
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      ws = new WebSocket(protocol + '//' + window.location.host + '/api/live/control');
-      ws.onopen = () => addLog('🔗', 'Remote control connection established');
-      ws.onclose = () => { ws = null; addLog('🔌', 'Remote control disconnected'); };
-    }
-
-    function toggleControl() {
-      isControlling = !isControlling;
-      const btn = document.getElementById('takeControlBtn');
-      if (isControlling) {
-        initWebSocket();
-        btn.textContent = '✅ Controlling (Click to Release)';
-        btn.className = 'btn btn-primary';
-        screenImg.style.cursor = 'crosshair';
-        addLog('🖱️', 'Control mode active — click the screen image to interact with Zoom');
-      } else {
-        btn.textContent = '⚠️ Take Control';
-        btn.className = 'btn btn-warning';
-        screenImg.style.cursor = 'default';
-        addLog('🖱️', 'Control released');
-      }
-    }
-
-    function sendWs(evt) {
-      if (ws && ws.readyState === 1 && isControlling) ws.send(JSON.stringify(evt));
-    }
-
-    screenImg.addEventListener('click', (e) => {
-      if (!isControlling) return;
-      e.preventDefault();
-      const rect = screenImg.getBoundingClientRect();
-      sendWs({ type:'click', x: (e.clientX-rect.left)*(640/rect.width), y: (e.clientY-rect.top)*(360/rect.height) });
-    });
-
-    setInterval(() => {
-      refreshScreen();
-      pollStatus();
-    }, 2000);
-
+    initWebSocket();
+    setInterval(refreshScreen, 1500);
+    setInterval(pollStatus, 2000);
     setInterval(loadRecordings, 12000);
 
     pollStatus();

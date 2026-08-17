@@ -904,12 +904,20 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
     try {
       if (event.type === 'click') {
         await this.page.mouse.click(event.x, event.y);
+      } else if (event.type === 'dblclick') {
+        await this.page.mouse.click(event.x, event.y, { clickCount: 2 });
+      } else if (event.type === 'type' && typeof event.text === 'string') {
+        await this.page.keyboard.type(event.text, { delay: 20 });
+      } else if (event.type === 'press' && typeof event.key === 'string') {
+        await this.page.keyboard.press(event.key);
+      } else if (event.type === 'scroll') {
+        await this.page.mouse.wheel({ deltaY: event.deltaY || 300 });
+      } else if (event.type === 'goto' && typeof event.url === 'string') {
+        await this.page.goto(event.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
       } else if (event.type === 'mousedown') {
         await this.page.mouse.down();
       } else if (event.type === 'mouseup') {
         await this.page.mouse.up();
-      } else if (event.type === 'mousemove') {
-        await this.page.mouse.move(event.x, event.y);
       } else if (event.type === 'keydown') {
         await this.page.keyboard.down(event.key);
       } else if (event.type === 'keyup') {

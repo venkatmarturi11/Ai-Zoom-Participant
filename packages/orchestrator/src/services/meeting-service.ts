@@ -421,6 +421,19 @@ export class MeetingService {
       }
     }
   }
+
+  /**
+   * Launch an interactive browser session to Zoom Sign-in page for manual permanent login.
+   */
+  public async launchLoginSession(): Promise<void> {
+    if (activeBrowserAdapters.size > 0) return;
+    const adapter = new PuppeteerZoomAdapter('web-user', 'https://zoom.us/signin', undefined, 'User Login');
+    activeBrowserAdapters.set('manual-login', adapter);
+    adapter.connect().catch((err: any) => {
+      log.warn({ error: err?.message }, 'Login browser session finished');
+      activeBrowserAdapters.delete('manual-login');
+    });
+  }
 }
 
 export const meetingService = new MeetingService();
