@@ -403,6 +403,7 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
 
         // Native Puppeteer typing for React 18 inputs
         try {
+          // Standard Join Name input
           const nameInputHandle = await this.page.$(
             '#input-for-name, input[name="display_name"], #inputname, input[name="inputname"], input[placeholder*="Name" i]',
           );
@@ -411,6 +412,56 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
             if (!currentVal || currentVal !== this.displayName) {
               await nameInputHandle.click({ clickCount: 3 }).catch(() => {});
               await nameInputHandle.type(this.displayName, { delay: 25 }).catch(() => {});
+            }
+          }
+
+          // Registration Page: First Name, Last Name, Email
+          const parts = this.displayName.trim().split(/\s+/);
+          const firstName = parts[0] || 'Assistant';
+          const lastName = parts.slice(1).join(' ') || 'Bot';
+          const botEmail = process.env['ZOOM_BOT_EMAIL'] || `${firstName.toLowerCase()}.${lastName.toLowerCase()}${Math.floor(Math.random() * 900 + 100)}@gmail.com`;
+
+          const firstNameHandle = await this.page.$(
+            '#first_name, #firstName, input[name="first_name"], input[placeholder*="First Name" i], input[aria-label*="First Name" i]',
+          );
+          if (firstNameHandle) {
+            const val = await this.page.evaluate((el: any) => el.value, firstNameHandle);
+            if (!val) {
+              await firstNameHandle.click({ clickCount: 3 }).catch(() => {});
+              await firstNameHandle.type(firstName, { delay: 25 }).catch(() => {});
+            }
+          }
+
+          const lastNameHandle = await this.page.$(
+            '#last_name, #lastName, input[name="last_name"], input[placeholder*="Last Name" i], input[aria-label*="Last Name" i]',
+          );
+          if (lastNameHandle) {
+            const val = await this.page.evaluate((el: any) => el.value, lastNameHandle);
+            if (!val) {
+              await lastNameHandle.click({ clickCount: 3 }).catch(() => {});
+              await lastNameHandle.type(lastName, { delay: 25 }).catch(() => {});
+            }
+          }
+
+          const emailHandle = await this.page.$(
+            '#email, input[name="email"], input[type="email"], input[placeholder*="Email" i], input[aria-label*="Email" i]',
+          );
+          if (emailHandle) {
+            const val = await this.page.evaluate((el: any) => el.value, emailHandle);
+            if (!val) {
+              await emailHandle.click({ clickCount: 3 }).catch(() => {});
+              await emailHandle.type(botEmail, { delay: 25 }).catch(() => {});
+            }
+          }
+
+          const confirmEmailHandle = await this.page.$(
+            '#confirm_email, input[name="confirm_email"], input[placeholder*="Confirm Email" i]',
+          );
+          if (confirmEmailHandle) {
+            const val = await this.page.evaluate((el: any) => el.value, confirmEmailHandle);
+            if (!val) {
+              await confirmEmailHandle.click({ clickCount: 3 }).catch(() => {});
+              await confirmEmailHandle.type(botEmail, { delay: 25 }).catch(() => {});
             }
           }
         } catch {}
@@ -461,7 +512,39 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
                 }
               });
 
-              // 2. Set Name input using React property setter descriptor
+              // 2. Click "Register and Join" or Registration Submit button if on registration page
+              const registerBtns = Array.from(
+                document.querySelectorAll('button, input[type="submit"], .zm-btn, a'),
+              ).filter((el) => {
+                const txt = ((el as HTMLElement).innerText || (el as HTMLInputElement).value || '').trim().toLowerCase();
+                return (
+                  txt.includes('register and join') ||
+                  txt === 'register' ||
+                  txt === 'register and join meeting' ||
+                  el.id === 'btnSubmit'
+                );
+              });
+              if (registerBtns.length > 0) {
+                (registerBtns[0] as HTMLElement).click();
+              }
+
+              // 3. Click post-registration "Click here to join" or "Join from your browser" link
+              const postRegLinks = Array.from(document.querySelectorAll('a, button')).filter((el) => {
+                const txt = ((el as HTMLElement).innerText || '').trim().toLowerCase();
+                const href = (el as HTMLAnchorElement).href || '';
+                return (
+                  txt.includes('click here to join') ||
+                  txt.includes('join meeting') ||
+                  txt.includes('join from your browser') ||
+                  href.includes('/wc/') ||
+                  href.includes('/j/')
+                );
+              });
+              if (postRegLinks.length > 0) {
+                (postRegLinks[0] as HTMLElement).click();
+              }
+
+              // 4. Set Name input using React property setter descriptor
               const nameInput =
                 (document.querySelector('#input-for-name') as HTMLInputElement) ||
                 (document.querySelector('input[name="display_name"]') as HTMLInputElement) ||
@@ -486,7 +569,7 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
                 );
               }
 
-              // 3. Set Passcode input if provided
+              // 5. Set Passcode input if provided
               if (pwd) {
                 const pwdInput =
                   (document.querySelector('#input-for-pwd') as HTMLInputElement) ||
@@ -506,7 +589,7 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
                 }
               }
 
-              // 4. Request submit on form if present
+              // 6. Request submit on form if present
               const form = (nameInput ? nameInput.closest('form') : null) || document.querySelector('form');
               if (form) {
                 try {
@@ -516,7 +599,7 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
                 }
               }
 
-              // 5. Click Join button
+              // 7. Click Join button
               const buttons = Array.from(document.querySelectorAll('button, .zm-btn, input[type="submit"], a'));
               let clicked = false;
               for (const b of buttons) {
@@ -536,7 +619,7 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
                 }
               }
 
-              // 6. Join Computer Audio if dialog appeared
+              // 8. Join Computer Audio if dialog appeared
               const audioBtns = Array.from(document.querySelectorAll('button')).filter((b) => {
                 const txt = (b.innerText || '').toLowerCase();
                 return (
