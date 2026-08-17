@@ -174,9 +174,15 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
 
       try {
         await recorder.stop().catch(() => {});
-        // Give FFmpeg 1 second to flush the MP4 trailer
-        await new Promise((res) => setTimeout(res, 1200));
       } catch {}
+
+      // Poll up to 5 seconds to guarantee FFmpeg completes writing the MP4 file
+      for (let i = 0; i < 10; i++) {
+        if (fs.existsSync(outFile) && fs.statSync(outFile).size > 1024) {
+          break;
+        }
+        await new Promise((res) => setTimeout(res, 500));
+      }
 
       if (fs.existsSync(outFile) && fs.statSync(outFile).size > 0) {
         // Apply faststart remux with 1-second keyframe GOP so MP4 is 100% forward/backward scrubbable in all players
@@ -330,6 +336,9 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
           '--autoplay-policy=no-user-gesture-required',
           // ── Optimized resolution and software compositor for Render Linux ──
           '--window-size=1280,720',
+          '--use-gl=swiftshader',
+          '--enable-webgl',
+          '--enable-accelerated-2d-canvas',
           '--enable-software-rasterizer',
           '--run-all-compositor-stages-before-draw',
           '--disable-extensions',

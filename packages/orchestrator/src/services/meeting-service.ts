@@ -78,17 +78,7 @@ export class MeetingService {
       status: 'STARTING',
     });
 
-    // Enqueue BullMQ start job with deterministic job ID
-    const jobId = await queueProducers.enqueueMeetingStart({
-      meetingId: meeting.id,
-      userId: user.id,
-      zoomMeetingId: params.meetingId,
-      requestedAt: new Date().toISOString(),
-      mode: params.mode,
-    }).catch((err) => {
-      log.warn({ error: err?.message }, 'BullMQ enqueue skipped (continuing in-memory/DB)');
-      return `job-${meeting.id}`;
-    });
+    const jobId = `inprocess-${meeting.id}`;
 
     // Launch headless Puppeteer browser agent to enter Zoom meeting room
     try {
