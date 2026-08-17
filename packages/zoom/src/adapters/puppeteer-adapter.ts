@@ -400,133 +400,175 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
       // Robust in-page automation loop to fill React-controlled inputs, dismiss modals, and click Join
       const fillAndJoinMeeting = async (): Promise<boolean> => {
         if (!this.page) return false;
-        return this.page.evaluate((name: string, pwd?: string) => {
-          // 1. Auto-dismiss cookie consent and permission modals
-          const dismissables = Array.from(document.querySelectorAll('button, a, div[role="button"], span')).filter((el) => {
-            const txt = ((el as HTMLElement).innerText || '').trim().toLowerCase();
-            return [
-              'got it',
-              'ok',
-              'dismiss',
-              'close',
-              'i agree',
-              'allow',
-              'accept all cookies',
-              'stay signed in',
-              'continue',
-              'skip',
-              'join without signing in',
-              'join from your browser',
-            ].includes(txt);
-          });
-          dismissables.forEach((el) => {
-            try {
-              (el as HTMLElement).click();
-            } catch {
-              // ignore
-            }
-          });
 
-          // 2. Set Name input using React property setter descriptor
-          const nameInput =
-            (document.querySelector('#input-for-name') as HTMLInputElement) ||
-            (document.querySelector('input[name="display_name"]') as HTMLInputElement) ||
-            (document.querySelector('#inputname') as HTMLInputElement) ||
-            (document.querySelector('input[name="inputname"]') as HTMLInputElement) ||
-            (document.querySelector('input[placeholder*="Name" i]') as HTMLInputElement);
-
-          if (nameInput && (!nameInput.value || nameInput.value !== name)) {
-            const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
-            if (valueSetter) {
-              valueSetter.call(nameInput, name);
-            } else {
-              nameInput.value = name;
-            }
-            nameInput.dispatchEvent(new Event('input', { bubbles: true }));
-            nameInput.dispatchEvent(new Event('change', { bubbles: true }));
-            nameInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
-            nameInput.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
-          }
-
-          // 3. Set Passcode input if provided
-          if (pwd) {
-            const pwdInput =
-              (document.querySelector('#input-for-pwd') as HTMLInputElement) ||
-              (document.querySelector('#inputpasscode') as HTMLInputElement) ||
-              (document.querySelector('input[name="inputpasscode"]') as HTMLInputElement) ||
-              (document.querySelector('input[type="password"]') as HTMLInputElement);
-
-            if (pwdInput && !pwdInput.value) {
-              const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
-              if (valueSetter) {
-                valueSetter.call(pwdInput, pwd);
-              } else {
-                pwdInput.value = pwd;
-              }
-              pwdInput.dispatchEvent(new Event('input', { bubbles: true }));
-              pwdInput.dispatchEvent(new Event('change', { bubbles: true }));
+        // Native Puppeteer typing for React 18 inputs
+        try {
+          const nameInputHandle = await this.page.$(
+            '#input-for-name, input[name="display_name"], #inputname, input[name="inputname"], input[placeholder*="Name" i]',
+          );
+          if (nameInputHandle) {
+            const currentVal = await this.page.evaluate((el: any) => el.value, nameInputHandle);
+            if (!currentVal || currentVal !== this.displayName) {
+              await nameInputHandle.click({ clickCount: 3 }).catch(() => {});
+              await nameInputHandle.type(this.displayName, { delay: 25 }).catch(() => {});
             }
           }
+        } catch {}
 
-          // 4. Request submit on form if present
-          const form = (nameInput ? nameInput.closest('form') : null) || document.querySelector('form');
-          if (form) {
-            try {
-              form.requestSubmit();
-            } catch {
-              form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-            }
-          }
-
-          // 5. Click Join button
-          const buttons = Array.from(document.querySelectorAll('button, .zm-btn, input[type="submit"], a'));
-          let clicked = false;
-          for (const b of buttons) {
-            const txt = ((b as HTMLElement).innerText || (b as HTMLInputElement).value || '').trim().toLowerCase();
-            if (
-              txt === 'join' ||
-              txt.includes('join meeting') ||
-              txt.includes('join from your browser') ||
-              b.classList.contains('preview-join-button') ||
-              b.id === 'joinBtn'
-            ) {
-              b.classList.remove('disabled', 'zm-btn--disabled');
-              (b as HTMLButtonElement).disabled = false;
-              (b as HTMLElement).click();
-              clicked = true;
-              break;
-            }
-          }
-
-          // 6. Join Computer Audio if dialog appeared
-          const audioBtns = Array.from(document.querySelectorAll('button')).filter((b) => {
-            const txt = (b.innerText || '').toLowerCase();
-            return (
-              txt.includes('join audio') ||
-              txt.includes('computer audio') ||
-              b.classList.contains('join-audio-by-voip__join-btn')
+        try {
+          if (this.passcode) {
+            const pwdInputHandle = await this.page.$(
+              '#input-for-pwd, #inputpasscode, input[name="inputpasscode"], input[type="password"]',
             );
-          });
-          audioBtns.forEach((b) => {
-            try {
-              b.click();
-            } catch {
-              // ignore
+            if (pwdInputHandle) {
+              const currentPwd = await this.page.evaluate((el: any) => el.value, pwdInputHandle);
+              if (!currentPwd) {
+                await pwdInputHandle.click({ clickCount: 3 }).catch(() => {});
+                await pwdInputHandle.type(this.passcode, { delay: 25 }).catch(() => {});
+              }
             }
-          });
+          }
+        } catch {}
 
-          return clicked;
-        }, this.displayName, this.passcode).catch(() => false);
+        return this.page
+          .evaluate(
+            (name: string, pwd?: string) => {
+              // 1. Auto-dismiss cookie consent and permission modals
+              const dismissables = Array.from(document.querySelectorAll('button, a, div[role="button"], span')).filter(
+                (el) => {
+                  const txt = ((el as HTMLElement).innerText || '').trim().toLowerCase();
+                  return [
+                    'got it',
+                    'ok',
+                    'dismiss',
+                    'close',
+                    'i agree',
+                    'allow',
+                    'accept all cookies',
+                    'stay signed in',
+                    'continue',
+                    'skip',
+                    'join without signing in',
+                    'join from your browser',
+                  ].includes(txt);
+                },
+              );
+              dismissables.forEach((el) => {
+                try {
+                  (el as HTMLElement).click();
+                } catch {
+                  // ignore
+                }
+              });
+
+              // 2. Set Name input using React property setter descriptor
+              const nameInput =
+                (document.querySelector('#input-for-name') as HTMLInputElement) ||
+                (document.querySelector('input[name="display_name"]') as HTMLInputElement) ||
+                (document.querySelector('#inputname') as HTMLInputElement) ||
+                (document.querySelector('input[name="inputname"]') as HTMLInputElement) ||
+                (document.querySelector('input[placeholder*="Name" i]') as HTMLInputElement);
+
+              if (nameInput && (!nameInput.value || nameInput.value !== name)) {
+                const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+                if (valueSetter) {
+                  valueSetter.call(nameInput, name);
+                } else {
+                  nameInput.value = name;
+                }
+                nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+                nameInput.dispatchEvent(new Event('change', { bubbles: true }));
+                nameInput.dispatchEvent(
+                  new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }),
+                );
+                nameInput.dispatchEvent(
+                  new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }),
+                );
+              }
+
+              // 3. Set Passcode input if provided
+              if (pwd) {
+                const pwdInput =
+                  (document.querySelector('#input-for-pwd') as HTMLInputElement) ||
+                  (document.querySelector('#inputpasscode') as HTMLInputElement) ||
+                  (document.querySelector('input[name="inputpasscode"]') as HTMLInputElement) ||
+                  (document.querySelector('input[type="password"]') as HTMLInputElement);
+
+                if (pwdInput && !pwdInput.value) {
+                  const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+                  if (valueSetter) {
+                    valueSetter.call(pwdInput, pwd);
+                  } else {
+                    pwdInput.value = pwd;
+                  }
+                  pwdInput.dispatchEvent(new Event('input', { bubbles: true }));
+                  pwdInput.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+              }
+
+              // 4. Request submit on form if present
+              const form = (nameInput ? nameInput.closest('form') : null) || document.querySelector('form');
+              if (form) {
+                try {
+                  form.requestSubmit();
+                } catch {
+                  form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+                }
+              }
+
+              // 5. Click Join button
+              const buttons = Array.from(document.querySelectorAll('button, .zm-btn, input[type="submit"], a'));
+              let clicked = false;
+              for (const b of buttons) {
+                const txt = ((b as HTMLElement).innerText || (b as HTMLInputElement).value || '').trim().toLowerCase();
+                if (
+                  txt === 'join' ||
+                  txt.includes('join meeting') ||
+                  txt.includes('join from your browser') ||
+                  b.classList.contains('preview-join-button') ||
+                  b.id === 'joinBtn'
+                ) {
+                  b.classList.remove('disabled', 'zm-btn--disabled');
+                  (b as HTMLButtonElement).disabled = false;
+                  (b as HTMLElement).click();
+                  clicked = true;
+                  break;
+                }
+              }
+
+              // 6. Join Computer Audio if dialog appeared
+              const audioBtns = Array.from(document.querySelectorAll('button')).filter((b) => {
+                const txt = (b.innerText || '').toLowerCase();
+                return (
+                  txt.includes('join audio') ||
+                  txt.includes('computer audio') ||
+                  b.classList.contains('join-audio-by-voip__join-btn')
+                );
+              });
+              audioBtns.forEach((b) => {
+                try {
+                  b.click();
+                } catch {
+                  // ignore
+                }
+              });
+
+              return clicked;
+            },
+            this.displayName,
+            this.passcode,
+          )
+          .catch(() => false);
       };
 
-      // Attempt join up to 40 seconds (or longer if waiting room or human interaction is active)
+      // Attempt join up to 90 seconds (or up to 10 minutes if waiting room or human interaction is active)
       const checkStart = Date.now();
       let hasEnteredMeeting = false;
 
       while (true) {
         const elapsed = Date.now() - checkStart;
-        if (elapsed > 40000 && !this.needsHumanInteraction && !this.isWaitingRoom) {
-          break; // Timeout after 40s only if no human interaction is detected and not in waiting room
+        if (elapsed > 90000 && !this.needsHumanInteraction && !this.isWaitingRoom) {
+          break; // Timeout after 90s only if no human interaction is detected and not in waiting room
         }
         if (elapsed > 600000) {
           break; // Hard timeout after 10 minutes regardless
@@ -534,34 +576,55 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
 
         await fillAndJoinMeeting();
 
-        const state = await this.page.evaluate(() => {
-          const text = (document.body ? document.body.innerText || '' : '').toLowerCase();
-          const inWaitingRoom =
-            text.includes('waiting room') ||
-            text.includes('will let you in') ||
-            text.includes('please wait') ||
-            text.includes('waiting for the host') ||
-            text.includes('host will let you in') ||
-            text.includes('let you in soon');
-          const hasMeetingUI =
-            Boolean(document.querySelector('.footer__leave-btn')) ||
-            Boolean(document.querySelector('[aria-label*="leave" i]')) ||
-            Boolean(document.querySelector('.participants-header')) ||
-            Boolean(document.querySelector('.speaker-bar')) ||
-            Boolean(document.querySelector('#wc-footer')) ||
-            Boolean(document.querySelector('canvas')) ||
-            Boolean(document.querySelector('#wc-container')) ||
-            (text.includes('participants') && text.includes('leave'));
-          const url = window.location.href || '';
-          const needsHuman = url.includes('signin') || url.includes('login') || text.includes('captcha') || text.includes('verify you are human') || text.includes('security check') || text.includes('stay signed in');
-          return { inWaitingRoom, hasMeetingUI, needsHuman };
-        }).catch(() => ({ inWaitingRoom: false, hasMeetingUI: false, needsHuman: false }));
+        const state = await this.page
+          .evaluate(() => {
+            const text = (document.body ? document.body.innerText || '' : '').toLowerCase();
+            const inWaitingRoom =
+              text.includes('waiting room') ||
+              text.includes('will let you in') ||
+              text.includes('please wait') ||
+              text.includes('waiting for the host') ||
+              text.includes('host will let you in') ||
+              text.includes('let you in soon');
+            const hasMeetingUI =
+              Boolean(document.querySelector('.footer__leave-btn')) ||
+              Boolean(document.querySelector('[aria-label*="leave" i]')) ||
+              Boolean(document.querySelector('[aria-label*="end" i]')) ||
+              Boolean(document.querySelector('[aria-label*="mute" i]')) ||
+              Boolean(document.querySelector('[aria-label*="audio" i]')) ||
+              Boolean(document.querySelector('.participants-header')) ||
+              Boolean(document.querySelector('.speaker-bar')) ||
+              Boolean(document.querySelector('#wc-footer')) ||
+              Boolean(document.querySelector('canvas')) ||
+              Boolean(document.querySelector('#wc-container')) ||
+              Boolean(document.querySelector('.main-layout')) ||
+              Boolean(document.querySelector('.meeting-client')) ||
+              Boolean(document.querySelector('video')) ||
+              Boolean(document.querySelector('.join-audio-by-voip__join-btn')) ||
+              (text.includes('participants') && (text.includes('leave') || text.includes('chat') || text.includes('record')));
+            const url = window.location.href || '';
+            const needsHuman =
+              url.includes('signin') ||
+              url.includes('login') ||
+              text.includes('captcha') ||
+              text.includes('verify you are human') ||
+              text.includes('security check') ||
+              text.includes('stay signed in');
+            return { inWaitingRoom, hasMeetingUI, needsHuman };
+          })
+          .catch(() => ({ inWaitingRoom: false, hasMeetingUI: false, needsHuman: false }));
 
         if (state.needsHuman && !this.needsHumanInteraction) {
           this.needsHumanInteraction = true;
-          log.info({ meetingId: this.meetingId }, '🚨 Bot requires human interaction (Login/CAPTCHA detected). Pausing automation timeouts.');
+          log.info(
+            { meetingId: this.meetingId },
+            '🚨 Bot requires human interaction (Login/CAPTCHA detected). Pausing automation timeouts.',
+          );
           if (onStatusCallback) {
-            await onStatusCallback('NEEDS_HUMAN', 'Bot encountered Zoom login/verification screen — click Live Screen to assist');
+            await onStatusCallback(
+              'NEEDS_HUMAN',
+              'Bot encountered Zoom login/verification screen — click Live Screen to assist',
+            );
           }
         } else if (!state.needsHuman && this.needsHumanInteraction && state.hasMeetingUI) {
           this.needsHumanInteraction = false;
@@ -585,18 +648,24 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
           }
         }
 
-        await new Promise((res) => setTimeout(res, 2500));
+        await new Promise((res) => setTimeout(res, 2000));
       }
 
       if (!hasEnteredMeeting) {
         const pageContent = await this.page.content().catch(() => '');
-        const stillInWaitingRoom = /waiting room|please wait|host will let you in|waiting for the host/i.test(pageContent);
-        this.isWaitingRoom = stillInWaitingRoom;
-        throw new Error(
-          stillInWaitingRoom
-            ? 'Bot is stuck in the Zoom waiting room — host has not admitted it'
-            : 'Could not confirm the bot entered the Zoom meeting room (join may have failed silently)',
+        const stillInWaitingRoom = /waiting room|please wait|host will let you in|waiting for the host/i.test(
+          pageContent,
         );
+        this.isWaitingRoom = stillInWaitingRoom;
+        if (stillInWaitingRoom) {
+          // Keep waiting in waiting room rather than failing
+          this.isConnected = true;
+          log.info({ meetingId: this.meetingId }, 'Bot is in waiting room, keeping session open for host to admit');
+        } else {
+          throw new Error(
+            'Could not confirm the bot entered the Zoom meeting room (join may have failed silently)',
+          );
+        }
       }
 
       this.isConnected = true;
