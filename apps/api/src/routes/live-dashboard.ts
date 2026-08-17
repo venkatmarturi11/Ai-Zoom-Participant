@@ -1,4 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
+import { timingSafeEqual } from 'node:crypto';
 import { meetingService } from '@zoom-assistant/orchestrator';
 import { recordingRepo } from '@zoom-assistant/database';
 
@@ -7,14 +8,26 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
   /**
    * Verify admin API key for programmer-only endpoints.
    */
-  function verifyAdminKey(request: any, reply: any): boolean {
+  function verifyAdminKey(request: any, reply?: any): boolean {
     const adminKey = process.env['ADMIN_API_KEY']?.trim();
+    if (!adminKey) {
+      reply?.status(503).send({
+        error: 'AdminKeyNotConfigured',
+        message: 'ADMIN_API_KEY must be configured before the live dashboard can be used.',
+      });
+      return false;
+    }
     if (!adminKey) return true; // No key configured — allow all (dev mode)
 
     const headerKey = request.headers['x-admin-key'] as string | undefined;
     const queryKey = (request.query as any)?.key as string | undefined;
 
-    if (headerKey === adminKey || queryKey === adminKey) {
+    const suppliedKey = headerKey ?? queryKey;
+    if (
+      suppliedKey &&
+      suppliedKey.length === adminKey.length &&
+      timingSafeEqual(Buffer.from(suppliedKey), Buffer.from(adminKey))
+    ) {
       return true;
     }
 
@@ -28,7 +41,11 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
   /**
    * WS /api/live/control — WebSocket endpoint for Human-in-the-Loop browser control
    */
-  fastify.get('/api/live/control', { websocket: true }, (connection) => {
+  fastify.get('/api/live/control', { websocket: true }, (connection, request) => {
+    if (!verifyAdminKey(request)) {
+      connection.socket.close(1008, 'Unauthorized');
+      return;
+    }
     connection.socket.on('message', async (message: Buffer) => {
       try {
         const event = JSON.parse(message.toString());
@@ -42,7 +59,8 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
   /**
    * POST /api/live/launch-login — Open interactive browser to Zoom Sign-in page for 1-time permanent login
    */
-  fastify.post('/api/live/launch-login', async (_request, reply) => {
+  fastify.post('/api/live/launch-login', async (request, reply) => {
+    if (!verifyAdminKey(request, reply)) return;
     await meetingService.launchLoginSession();
     return reply.send({ success: true, message: 'Zoom sign-in browser launched on live screen' });
   });
@@ -77,7 +95,8 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
   /**
    * GET /api/live/status — JSON status of current bot screen and session
    */
-  fastify.get('/api/live/status', async (_request, reply) => {
+  fastify.get('/api/live/status', async (request, reply) => {
+    if (!verifyAdminKey(request, reply)) return;
     const status = await meetingService.getActiveLiveStatus();
     return reply.send({
       timestamp: new Date().toISOString(),
@@ -88,7 +107,8 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
   /**
    * POST /api/live/screenshot — Force-capture a fresh screenshot immediately
    */
-  fastify.post('/api/live/screenshot', async (_request, reply) => {
+  fastify.post('/api/live/screenshot', async (request, reply) => {
+    if (!verifyAdminKey(request, reply)) return;
     const screenshot = await meetingService.getActiveMeetingScreenshot();
     if (screenshot && screenshot.length > 0) {
       reply.header('Cache-Control', 'no-cache');
@@ -101,7 +121,8 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
   /**
    * GET /api/live/screen — Live JPEG image stream of the headless bot's browser
    */
-  fastify.get('/api/live/screen', async (_request, reply) => {
+  fastify.get('/api/live/screen', async (request, reply) => {
+    if (!verifyAdminKey(request, reply)) return;
     const screenshot = await meetingService.getActiveMeetingScreenshot();
 
     reply.header('Cache-Control', 'no-cache, no-store, must-revalidate');
@@ -146,7 +167,8 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
   /**
    * GET / — Live Visual Monitoring & Full Remote Control Center
    */
-  fastify.get('/', async (_request, reply) => {
+  fastify.get('/', async (request, reply) => {
+    if (!verifyAdminKey(request, reply)) return;
     const html = `
 <!DOCTYPE html>
 <html lang="en">
@@ -516,6 +538,11 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
   </div>
 
   <script>
+    const adminKey = new URLSearchParams(window.location.search).get('key') || '';
+    function apiUrl(path) {
+      if (!adminKey) return path;
+      return path + (path.includes('?') ? '&' : '?') + 'key=' + encodeURIComponent(adminKey);
+    }
     const screenImg = document.getElementById('liveScreen');
     const screenContainer = document.getElementById('screenContainer');
     const logList = document.getElementById('logList');
@@ -536,7 +563,7 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
     function initWebSocket() {
       if (ws && ws.readyState === 1) return;
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      ws = new WebSocket(protocol + '//' + window.location.host + '/api/live/control');
+      ws = new WebSocket(protocol + '//' + window.location.host + apiUrl('/api/live/control'));
       ws.onopen = () => addLog('🔗', 'Interactive remote control stream connected');
       ws.onclose = () => { setTimeout(initWebSocket, 2000); };
     }
@@ -603,7 +630,7 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
     async function launchLoginSession() {
       addLog('🚀', 'Launching interactive Zoom sign-in browser session...');
       try {
-        await fetch('/api/live/launch-login', { method: 'POST' });
+        await fetch(apiUrl('/api/live/launch-login'), { method: 'POST' });
         setTimeout(forceCapture, 1500);
       } catch (err) {
         addLog('❌', 'Failed to launch login session');
@@ -613,13 +640,13 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
     function refreshScreen() {
       if (!autoRefresh) return;
       const t = Date.now();
-      screenImg.src = '/api/live/screen?t=' + t;
+      screenImg.src = apiUrl('/api/live/screen?t=' + t);
       document.getElementById('lastUpdateOverlay').textContent = 'Updated: ' + new Date().toLocaleTimeString();
     }
 
     async function forceCapture() {
       try {
-        const res = await fetch('/api/live/screenshot', { method: 'POST' });
+        const res = await fetch(apiUrl('/api/live/screenshot'), { method: 'POST' });
         if (res.ok) {
           const blob = await res.blob();
           screenImg.src = URL.createObjectURL(blob);
@@ -635,7 +662,7 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
 
     async function pollStatus() {
       try {
-        const res = await fetch('/api/live/status');
+        const res = await fetch(apiUrl('/api/live/status'));
         if (!res.ok) return;
         const d = await res.json();
 
@@ -695,7 +722,7 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
       const container = document.getElementById('recordingsList');
       if (!container) return;
       try {
-        const res = await fetch('/api/recordings');
+        const res = await fetch(apiUrl('/api/recordings'));
         if (res.ok) {
           const items = await res.json();
           if (items.length === 0) {
@@ -713,6 +740,9 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
               '<a href="/api/recordings/' + item.id + '/download" target="_blank" class="btn btn-primary" style="font-size: 11px; padding: 5px 10px;">▶️ Download MP4</a>' +
             '</div>';
           }).join('');
+          container.querySelectorAll('a[href^="/api/recordings/"]').forEach(function(link) {
+            link.setAttribute('href', apiUrl(link.getAttribute('href')));
+          });
         } else if (res.status === 403) {
           container.innerHTML = '<div style="color: var(--muted); font-size: 12px;">🔒 Recordings require programmer API key (ADMIN_API_KEY).</div>';
         }

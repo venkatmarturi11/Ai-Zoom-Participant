@@ -6,7 +6,12 @@ import { connectZoomCommand } from './connect-zoom.js';
 import { accountCommand } from './account.js';
 import { disconnectZoomCommand, handleDisconnectConfirm } from './disconnect-zoom.js';
 import { joinCommand, handleMeetingLinkInput, handlePasscodeInput } from './join.js';
-import { scheduleCommand, handleScheduleTimeInput } from './schedule.js';
+import {
+  scheduleCommand,
+  handleScheduleMeetingLinkInput,
+  handleSchedulePasscodeInput,
+  handleScheduleTimeInput,
+} from './schedule.js';
 import { meetingsCommand } from './meetings.js';
 import { statusCommand } from './status.js';
 import { stopCommand, handleStopConfirm } from './stop.js';
@@ -66,6 +71,16 @@ export function registerCommands(bot: Bot<BotContext>): void {
 
     if (step === 'awaiting_passcode') {
       await handlePasscodeInput(ctx);
+      return;
+    }
+
+    if (step === 'awaiting_schedule_link') {
+      await handleScheduleMeetingLinkInput(ctx);
+      return;
+    }
+
+    if (step === 'awaiting_schedule_passcode') {
+      await handleSchedulePasscodeInput(ctx);
       return;
     }
 

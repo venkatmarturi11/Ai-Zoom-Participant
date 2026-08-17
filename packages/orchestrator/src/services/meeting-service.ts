@@ -345,7 +345,10 @@ export class MeetingService {
     let zoomAccount = await zoomAccountRepo.findActiveByUserId(user.id);
     if (!zoomAccount) {
       // Auto-provision Zoom account so user never needs browser OAuth or Zoom Marketplace login
-      const encryptionKey = process.env['ENCRYPTION_KEY'] ?? '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+      const encryptionKey = process.env['ENCRYPTION_KEY'];
+      if (!encryptionKey) {
+        throw new ZoomError(ZoomErrorCode.NOT_ALLOWED, 'ENCRYPTION_KEY must be configured before using Zoom accounts');
+      }
       const dummyToken = 'server_to_server_oauth_active';
       const accessTokenEncrypted = encryptToken(dummyToken, encryptionKey);
       const refreshTokenEncrypted = encryptToken(dummyToken, encryptionKey);

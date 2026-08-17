@@ -913,7 +913,11 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
       } else if (event.type === 'scroll') {
         await this.page.mouse.wheel({ deltaY: event.deltaY || 300 });
       } else if (event.type === 'goto' && typeof event.url === 'string') {
-        await this.page.goto(event.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        const url = new URL(event.url);
+        if (url.protocol !== 'https:' || !/(^|\.)zoom\.us$/i.test(url.hostname)) {
+          throw new Error('Remote navigation is limited to HTTPS Zoom pages');
+        }
+        await this.page.goto(url.toString(), { waitUntil: 'domcontentloaded', timeout: 30000 });
       } else if (event.type === 'mousedown') {
         await this.page.mouse.down();
       } else if (event.type === 'mouseup') {

@@ -15,6 +15,8 @@ export interface SessionData {
     | 'idle'
     | 'awaiting_meeting_link'
     | 'awaiting_passcode'
+    | 'awaiting_schedule_link'
+    | 'awaiting_schedule_passcode'
     | 'awaiting_schedule_time'
     | 'awaiting_zoom_login'
     | 'awaiting_zoom_link_after_login';
