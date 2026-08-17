@@ -100,18 +100,22 @@ Meeting: ${topic ?? 'Active Meeting'}
 Duration: ${duration}`,
 
   // Shown when the bot is about to join a meeting
-  botJoining: (meetingId: string, displayName: string, meetingUrl?: string) =>
-    `🚀 <b>Zoom Meeting Assistant</b>
+  botJoining: (meetingId: string, displayName: string, meetingUrl?: string, liveUrl?: string) =>
+    `🚀 <b>Zoom Meeting Assistant Active!</b>
 
 📌 <b>Meeting ID:</b> <code>${meetingId}</code>
 👤 <b>Display Name:</b> <code>${displayName}</code>
 
-🔗 <b>Direct Links for You:</b>
-• <a href="${meetingUrl || `https://zoom.us/j/${meetingId}`}">👉 <b>Click here to Join Meeting Directly</b></a>
-• <a href="https://zoom.us/signin">👉 <b>Click here to Login to Zoom</b></a>
+🔗 <b>1. Join Meeting on Your Device:</b>
+👉 <a href="${meetingUrl || `https://zoom.us/j/${meetingId}`}"><b>Click here to Join Meeting Directly</b></a>
 
-🤖 <i>The bot is launching in background and recording the entire session.</i>
-<i>Tap the button below to view the bot's live screen!</i>`,
+🔐 <b>2. Zoom Account Login:</b>
+👉 <a href="https://zoom.us/signin"><b>Click here to Sign In to Zoom</b></a>
+
+🖥️ <b>3. Bot Live Screen & Help Link:</b>
+👉 <a href="${liveUrl || 'http://localhost:3000'}"><b>Click here to View & Help Bot Live (Captcha/Login)</b></a>
+
+<i>🤖 The bot is entering the meeting and recording video + audio. You can join on your device and leave anytime — the bot will keep recording! Send <code>/stop</code> when done.</i>`,
 
   botConnected: (meetingId: string, displayName: string) =>
     `✅ <b>Bot is IN the Zoom Meeting!</b>

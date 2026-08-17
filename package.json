@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "dev:bot": "npm run dev --workspace=apps/telegram-bot",
-    "dev:api": "npm run dev --workspace=apps/api",
+    "dev:api": "npm run build:packages && npm run build -w apps/telegram-bot && tsx watch apps/api/src/index.ts",
     "dev:scheduler": "npm run dev --workspace=apps/scheduler",
     "build:packages": "npm run build -w packages/shared -w packages/crypto -w packages/database -w packages/meeting-parser -w packages/queue -w packages/zoom -w packages/orchestrator",
     "build:apps": "npm run build -w apps/telegram-bot -w apps/api -w apps/scheduler -w apps/worker",

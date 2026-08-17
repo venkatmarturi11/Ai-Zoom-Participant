@@ -105,7 +105,7 @@ async function executeJoinFlow(
 
   // Step 1: Send user the login page + direct join link + live screen button IMMEDIATELY (<50ms)
   const initialStatusMsg = await ctx.reply(
-    messages.botJoining(meetingId, userDisplayName, meetingUrl),
+    messages.botJoining(meetingId, userDisplayName, meetingUrl, liveMonitorUrl),
     {
       parse_mode: 'HTML',
       link_preview_options: { is_disabled: true },
