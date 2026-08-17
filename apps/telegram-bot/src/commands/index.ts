@@ -13,6 +13,7 @@ import { stopCommand, handleStopConfirm } from './stop.js';
 import { settingsCommand } from './settings.js';
 import { pauseCommand, resumeCommand } from './pause-resume.js';
 import { liveCommand } from './live.js';
+import { loginCommand } from './login.js';
 import { userRepo } from '@zoom-assistant/database';
 import { extractZoomUrl } from '@zoom-assistant/meeting-parser';
 import { createLogger } from '@zoom-assistant/shared';
@@ -33,6 +34,7 @@ export function registerCommands(bot: Bot<BotContext>): void {
 
   // Register command handlers
   bot.command('start', startCommand);
+  bot.command('login', loginCommand);
   bot.command('live', liveCommand);
   bot.command('monitor', liveCommand);
   bot.command('help', helpCommand);
@@ -149,6 +151,7 @@ export async function setupBotCommands(bot: Bot<BotContext>): Promise<void> {
   try {
     await bot.api.setMyCommands([
       { command: 'start', description: '🚀 Start bot & get direct links' },
+      { command: 'login', description: '🔐 Login to Zoom Account (Permanent)' },
       { command: 'live', description: '🖥️ Live Screen & Help (Captcha/Login)' },
       { command: 'stop', description: '🛑 Stop recording & save video' },
       { command: 'status', description: '📊 Check recording status' },
