@@ -12,6 +12,7 @@ import { statusCommand } from './status.js';
 import { stopCommand, handleStopConfirm } from './stop.js';
 import { settingsCommand } from './settings.js';
 import { pauseCommand, resumeCommand } from './pause-resume.js';
+import { liveCommand } from './live.js';
 import { userRepo } from '@zoom-assistant/database';
 import { extractZoomUrl } from '@zoom-assistant/meeting-parser';
 import { createLogger } from '@zoom-assistant/shared';
@@ -32,6 +33,8 @@ export function registerCommands(bot: Bot<BotContext>): void {
 
   // Register command handlers
   bot.command('start', startCommand);
+  bot.command('live', liveCommand);
+  bot.command('monitor', liveCommand);
   bot.command('help', helpCommand);
   bot.command('connect_zoom', connectZoomCommand);
   bot.command('account', accountCommand);
@@ -145,19 +148,12 @@ export function registerCommands(bot: Bot<BotContext>): void {
 export async function setupBotCommands(bot: Bot<BotContext>): Promise<void> {
   try {
     await bot.api.setMyCommands([
-      { command: 'start', description: 'Start bot & connect Zoom' },
-      { command: 'join', description: 'Send a Zoom link to record' },
-      { command: 'stop', description: 'Stop recording & get download link' },
-      { command: 'status', description: 'Check active recording status' },
-      { command: 'meetings', description: 'List recent recordings' },
-      { command: 'connect_zoom', description: 'Connect Zoom account' },
-      { command: 'account', description: 'View connected Zoom account' },
-      { command: 'disconnect_zoom', description: 'Disconnect Zoom account' },
-      { command: 'schedule', description: 'Schedule a meeting join time' },
-      { command: 'pause', description: 'Pause notifications' },
-      { command: 'resume', description: 'Resume notifications' },
-      { command: 'settings', description: 'Bot settings' },
-      { command: 'help', description: 'Get help & documentation' },
+      { command: 'start', description: '🚀 Start bot & get direct links' },
+      { command: 'live', description: '🖥️ Live Screen & Help (Captcha/Login)' },
+      { command: 'stop', description: '🛑 Stop recording & save video' },
+      { command: 'status', description: '📊 Check recording status' },
+      { command: 'meetings', description: '📼 List recent recordings' },
+      { command: 'help', description: 'ℹ️ Help & documentation' },
     ]);
     log.info('Registered Telegram bot commands menu');
   } catch (err: unknown) {
