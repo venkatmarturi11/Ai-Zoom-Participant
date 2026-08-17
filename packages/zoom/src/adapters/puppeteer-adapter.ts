@@ -305,7 +305,20 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
           // 1. Auto-dismiss cookie consent and permission modals
           const dismissables = Array.from(document.querySelectorAll('button, a, div[role="button"], span')).filter((el) => {
             const txt = ((el as HTMLElement).innerText || '').trim().toLowerCase();
-            return ['got it', 'ok', 'dismiss', 'close', 'i agree', 'allow', 'accept all cookies'].includes(txt);
+            return [
+              'got it',
+              'ok',
+              'dismiss',
+              'close',
+              'i agree',
+              'allow',
+              'accept all cookies',
+              'stay signed in',
+              'continue',
+              'skip',
+              'join without signing in',
+              'join from your browser',
+            ].includes(txt);
           });
           dismissables.forEach((el) => {
             try {
@@ -367,13 +380,14 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
           }
 
           // 5. Click Join button
-          const buttons = Array.from(document.querySelectorAll('button, .zm-btn, input[type="submit"]'));
+          const buttons = Array.from(document.querySelectorAll('button, .zm-btn, input[type="submit"], a'));
           let clicked = false;
           for (const b of buttons) {
             const txt = ((b as HTMLElement).innerText || (b as HTMLInputElement).value || '').trim().toLowerCase();
             if (
               txt === 'join' ||
               txt.includes('join meeting') ||
+              txt.includes('join from your browser') ||
               b.classList.contains('preview-join-button') ||
               b.id === 'joinBtn'
             ) {
@@ -440,13 +454,16 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
             Boolean(document.querySelector('#wc-container')) ||
             (text.includes('participants') && text.includes('leave'));
           const url = window.location.href || '';
-          const needsHuman = url.includes('signin') || url.includes('login') || text.includes('captcha') || text.includes('verify you are human') || text.includes('security check');
+          const needsHuman = url.includes('signin') || url.includes('login') || text.includes('captcha') || text.includes('verify you are human') || text.includes('security check') || text.includes('stay signed in');
           return { inWaitingRoom, hasMeetingUI, needsHuman };
         }).catch(() => ({ inWaitingRoom: false, hasMeetingUI: false, needsHuman: false }));
 
         if (state.needsHuman && !this.needsHumanInteraction) {
           this.needsHumanInteraction = true;
           log.info({ meetingId: this.meetingId }, '🚨 Bot requires human interaction (Login/CAPTCHA detected). Pausing automation timeouts.');
+          if (onStatusCallback) {
+            await onStatusCallback('NEEDS_HUMAN', 'Bot encountered Zoom login/verification screen — click Live Screen to assist');
+          }
         } else if (!state.needsHuman && this.needsHumanInteraction && state.hasMeetingUI) {
           this.needsHumanInteraction = false;
           log.info({ meetingId: this.meetingId }, '✅ Human interaction resolved, resuming automation.');

@@ -1,5 +1,6 @@
 import type { BotContext } from '../bot.js';
 import { messages } from '../formatters/messages.js';
+import { liveControlKeyboard } from '../keyboards/inline.js';
 import { parseMeetingUrl, extractZoomUrl } from '@zoom-assistant/meeting-parser';
 import { userRepo, meetingRepo } from '@zoom-assistant/database';
 import { meetingService } from '@zoom-assistant/orchestrator';
@@ -121,28 +122,54 @@ async function executeJoinFlow(
     'Meeting Assistant';
 
   try {
-    // Step 1: Send user the login page + join links
+    const liveMonitorUrl =
+      process.env['RENDER_EXTERNAL_URL'] || `http://localhost:${process.env['API_PORT'] || 3000}`;
+
+    // Step 1: Send user the login page + join links and live control button
     const initialStatusMsg = await ctx.reply(
       messages.botJoining(meetingId, userDisplayName),
-      { parse_mode: 'HTML', link_preview_options: { is_disabled: true } },
+      {
+        parse_mode: 'HTML',
+        link_preview_options: { is_disabled: true },
+        reply_markup: liveControlKeyboard(liveMonitorUrl),
+      },
     );
 
     // Step 2: Status callback — updates the user's message in real time
-    const onStatusChange = async (status: 'CONNECTED' | 'FAILED' | 'WAITING_ROOM', detail?: string) => {
+    const onStatusChange = async (
+      status: 'CONNECTED' | 'FAILED' | 'WAITING_ROOM' | 'NEEDS_HUMAN',
+      detail?: string,
+    ) => {
       try {
         if (status === 'CONNECTED') {
           await ctx.api.editMessageText(
             ctx.chat!.id,
             initialStatusMsg.message_id,
             messages.botConnected(meetingId, userDisplayName),
-            { parse_mode: 'HTML' },
+            {
+              parse_mode: 'HTML',
+              reply_markup: liveControlKeyboard(liveMonitorUrl),
+            },
+          );
+        } else if (status === 'NEEDS_HUMAN') {
+          await ctx.api.editMessageText(
+            ctx.chat!.id,
+            initialStatusMsg.message_id,
+            messages.botNeedsHuman(meetingId),
+            {
+              parse_mode: 'HTML',
+              reply_markup: liveControlKeyboard(liveMonitorUrl),
+            },
           );
         } else if (status === 'WAITING_ROOM') {
           await ctx.api.editMessageText(
             ctx.chat!.id,
             initialStatusMsg.message_id,
             messages.botWaitingRoom(meetingId, userDisplayName),
-            { parse_mode: 'HTML' },
+            {
+              parse_mode: 'HTML',
+              reply_markup: liveControlKeyboard(liveMonitorUrl),
+            },
           );
         } else if (status === 'FAILED') {
           await ctx.api.editMessageText(

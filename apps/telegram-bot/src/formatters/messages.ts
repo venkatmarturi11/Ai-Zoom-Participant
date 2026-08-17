@@ -143,6 +143,15 @@ The bot is attending and recording the meeting session.
 
 <i>Please check that the meeting is currently live and the passcode is correct.</i>`,
 
+  botNeedsHuman: (meetingId: string) =>
+    `⚠️ <b>Action Required: Zoom Verification / Login Screen</b>
+
+📌 <b>Meeting ID:</b> <code>${meetingId}</code>
+
+The bot encountered a Zoom Sign-In, "Stay signed in", or CAPTCHA check on screen.
+Please tap the button below to open the Live Screen and complete the check or click Join!`,
+
+
   // Shown when recording is stopped and saved
   recordingSaved: (data: {
     meetingId: string;

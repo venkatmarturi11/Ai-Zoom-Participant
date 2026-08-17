@@ -21,7 +21,7 @@ export interface MeetingAdapter {
   authenticate(): Promise<void>;
 
   /** Connect to the meeting */
-  connect(onStatusCallback?: (status: 'CONNECTED' | 'FAILED' | 'WAITING_ROOM', detail?: string) => Promise<void> | void): Promise<void>;
+  connect(onStatusCallback?: (status: 'CONNECTED' | 'FAILED' | 'WAITING_ROOM' | 'NEEDS_HUMAN', detail?: string) => Promise<void> | void): Promise<void>;
 
   /** Handle remote human-in-the-loop control events */
   handleControlEvent?(event: any): Promise<void>;

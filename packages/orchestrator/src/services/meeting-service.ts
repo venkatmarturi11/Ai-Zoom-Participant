@@ -26,7 +26,7 @@ export interface CreateMeetingParams {
   isExternalMeeting?: boolean;
   isHostAccount?: boolean;
   userPresentInMeeting?: boolean;
-  onStatusChange?: (status: 'CONNECTED' | 'FAILED' | 'WAITING_ROOM', detail?: string) => Promise<void> | void;
+  onStatusChange?: (status: 'CONNECTED' | 'FAILED' | 'WAITING_ROOM' | 'NEEDS_HUMAN', detail?: string) => Promise<void> | void;
 }
 
 export interface ScheduleMeetingParams extends CreateMeetingParams {
@@ -108,6 +108,10 @@ export class MeetingService {
               await meetingRepo.updateStatus(meeting.id, 'WAITING_ROOM').catch(() => {});
               if (params.onStatusChange) {
                 await params.onStatusChange('WAITING_ROOM', detail);
+              }
+            } else if (status === 'NEEDS_HUMAN') {
+              if (params.onStatusChange) {
+                await params.onStatusChange('NEEDS_HUMAN', detail);
               }
             }
           });

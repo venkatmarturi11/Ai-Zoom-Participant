@@ -45,3 +45,12 @@ export function waitingRoomKeyboard(meetingId: string) {
     .text('⏳ Continue Waiting', `wait:${meetingId}`)
     .text('🛑 Stop', `stop:${meetingId}`);
 }
+
+export function liveControlKeyboard(liveMonitorUrl: string, meetingId?: string) {
+  const kb = new InlineKeyboard().url('🖥️ Open Live Screen & Control (Captcha/Login/Join)', liveMonitorUrl);
+  if (meetingId) {
+    kb.row().text('🛑 Stop Recording', `stop_confirm:${meetingId}`);
+  }
+  return kb;
+}
+
