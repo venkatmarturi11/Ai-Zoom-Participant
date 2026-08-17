@@ -3,14 +3,26 @@ import type { Browser, Page } from 'puppeteer-core';
 import { PuppeteerScreenRecorder } from 'puppeteer-screen-recorder';
 import { addExtra } from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
-
-const puppeteer = addExtra(puppeteerCore as any);
-puppeteer.use(StealthPlugin());
+import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import type { MeetingAdapter, AdapterStatus } from './adapter-interface.js';
 import { createLogger } from '@zoom-assistant/shared';
+
+const execFileAsync = promisify(execFile);
+
+// Configure FFMPEG binary path from @ffmpeg-installer or environment
+const resolvedFfmpegPath =
+  process.env['FFMPEG_PATH'] || (ffmpegInstaller && (ffmpegInstaller as any).path ? (ffmpegInstaller as any).path : 'ffmpeg');
+if (ffmpegInstaller && (ffmpegInstaller as any).path) {
+  process.env['FFMPEG_PATH'] = (ffmpegInstaller as any).path;
+}
+
+const puppeteer = addExtra(puppeteerCore as any);
+puppeteer.use(StealthPlugin());
 
 const log = createLogger({ module: 'puppeteer-zoom-adapter' });
 
@@ -52,6 +64,7 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
   private isEnded = false;
   private cloudRecordingStarted = false;
   private needsHumanInteraction = false;
+  private audioWatcher?: NodeJS.Timeout;
 
   constructor(
     _userId: string,
@@ -101,11 +114,11 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
 
   /**
    * Start screen recording using PuppeteerScreenRecorder.
-   * Optimized for ≤2 CPU cores:
-   * - 3 FPS (minimal CPU usage)
-   * - 640x360 resolution (360p — lightweight)
-   * - 200kbps bitrate
-   * - JPEG quality 30 for dashboard screenshots (every 30s)
+   * Configured with explicit FFMPEG binary path and seekable MP4 post-processing:
+   * - 4 FPS (minimal CPU usage)
+   * - 640x360 resolution (360p — lightweight for ≤2 cores)
+   * - 250kbps bitrate
+   * - -movflags +faststart for instant seeking (forward/rewind) in all browsers
    */
   private startFrameRecorder(page: Page, meetingId: string): FrameRecorder {
     const recordingsDir = path.join(os.tmpdir(), 'zoom-recordings');
@@ -116,9 +129,11 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
     this.recordingFilePath = outFile;
 
     const recorder = new PuppeteerScreenRecorder(page as any, {
-      fps: 3,                                   // Ultra-low FPS — saves CPU
-      videoFrame: { width: 640, height: 360 },  // 360p — lightweight for ≤2 cores
-      videoBitrate: 200,                         // Low bitrate to save CPU & disk
+      followNewTab: true,
+      fps: 4,
+      ffmpeg_Path: resolvedFfmpegPath,
+      videoFrame: { width: 640, height: 360 },
+      videoBitrate: 250,
       videoCodec: 'libx264',
       videoFormat: 'mp4',
       aspectRatio: '16:9',
@@ -129,12 +144,12 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
       log.error({ error: err.message }, 'PuppeteerScreenRecorder failed to start');
     });
 
-    log.info({ outFile }, '🎥 Started PuppeteerScreenRecorder (3 FPS, 360p, 200kbps)');
+    log.info({ outFile, ffmpegPath: resolvedFfmpegPath }, '🎥 Started PuppeteerScreenRecorder (4 FPS, 360p, 250kbps)');
 
     let frameCount = 0;
     let isStopped = false;
 
-    // Lightweight interval for updating screenshots (every 30 seconds to save CPU)
+    // Lightweight interval for updating screenshots (every 20 seconds)
     let dashboardInterval: NodeJS.Timeout | null = setInterval(async () => {
       if (isStopped || !page) return;
       try {
@@ -146,7 +161,7 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
       } catch {
         // ignore navigation errors
       }
-    }, 30000); // Every 30s (was 15s, doubled to save CPU)
+    }, 20000);
 
     const stop = async (): Promise<string | undefined> => {
       if (isStopped) return outFile;
@@ -157,9 +172,32 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
         dashboardInterval = null;
       }
 
-      await recorder.stop().catch(() => {});
+      try {
+        await recorder.stop().catch(() => {});
+        // Give FFmpeg 1 second to flush the MP4 trailer
+        await new Promise((res) => setTimeout(res, 1200));
+      } catch {}
 
-      if (fs.existsSync(outFile)) {
+      if (fs.existsSync(outFile) && fs.statSync(outFile).size > 0) {
+        // Apply faststart remux so the MP4 is 100% seekable (forward / backward scrubbing)
+        const seekableFile = outFile.replace('.mp4', '-seekable.mp4');
+        try {
+          await execFileAsync(resolvedFfmpegPath, [
+            '-y',
+            '-i', outFile,
+            '-c', 'copy',
+            '-movflags', '+faststart',
+            seekableFile,
+          ]);
+          if (fs.existsSync(seekableFile) && fs.statSync(seekableFile).size > 0) {
+            fs.unlinkSync(outFile);
+            fs.renameSync(seekableFile, outFile);
+            log.info({ outFile }, '🎥 Remuxed MP4 with faststart (seeking enabled)');
+          }
+        } catch (remuxErr: any) {
+          log.warn({ error: remuxErr?.message }, 'Faststart remux notice (original file preserved)');
+        }
+
         const stats = fs.statSync(outFile);
         log.info({ outFile, sizeBytes: stats.size }, '🎥 Screen recording MP4 saved successfully');
         return outFile;
@@ -171,6 +209,46 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
       stop,
       getFrameCount: () => frameCount,
     };
+  }
+
+  /**
+   * Periodically checks and connects Zoom meeting audio (Join Audio by Computer)
+   */
+  private startAudioWatcher(page: Page): NodeJS.Timeout {
+    return setInterval(async () => {
+      if (!page || this.isEnded) return;
+      try {
+        await page.evaluate(() => {
+          // 1. Click "Join Audio by Computer" / "Join Computer Audio" in modal or banner
+          const audioButtons = Array.from(document.querySelectorAll('button, a, div[role="button"], span')).filter((el) => {
+            const txt = ((el as HTMLElement).innerText || '').trim().toLowerCase();
+            return (
+              txt === 'join audio by computer' ||
+              txt === 'join with computer audio' ||
+              txt === 'computer audio' ||
+              txt === 'join computer audio' ||
+              txt === 'join audio' ||
+              (el as HTMLElement).classList.contains('join-audio-by-voip__join-btn')
+            );
+          });
+          audioButtons.forEach((btn) => {
+            try {
+              (btn as HTMLElement).click();
+            } catch {}
+          });
+
+          // 2. Click "Join Audio" in the meeting toolbar if audio is still not connected
+          const toolbarAudioBtn = document.querySelector(
+            'button.join-audio-icon, button[aria-label*="Join Audio" i], #wc-footer button[aria-label*="Audio" i], button.footer-button__audio-icon'
+          );
+          if (toolbarAudioBtn) {
+            try {
+              (toolbarAudioBtn as HTMLElement).click();
+            } catch {}
+          }
+        });
+      } catch {}
+    }, 2500);
   }
 
   private async loginToZoom(): Promise<void> {
@@ -524,6 +602,11 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
       this.isConnected = true;
       log.info({ meetingId: this.meetingId, displayName: this.displayName }, '✅ Headless bot successfully entered the Zoom meeting room!');
 
+      // Start continuous audio connection watcher
+      if (this.page) {
+        this.audioWatcher = this.startAudioWatcher(this.page);
+      }
+
       // Attempt to initiate or detect Zoom Cloud Recording
       await this.handleMeetingRecording();
     } catch (err: any) {
@@ -659,6 +742,11 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
     log.info({ meetingId: this.meetingId }, 'Leaving Zoom meeting and finalizing video recording');
     this.isConnected = false;
     this.isEnded = true;
+
+    if (this.audioWatcher) {
+      clearInterval(this.audioWatcher);
+      this.audioWatcher = undefined;
+    }
 
     try {
       if (this.frameRecorder) {
