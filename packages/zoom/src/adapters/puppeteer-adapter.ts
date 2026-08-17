@@ -254,29 +254,15 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
   private async loginToZoom(): Promise<void> {
     if (!this.page) return;
 
-    // 1. Check if already logged in from persistent profile cookies
-    try {
-      await this.page.goto('https://zoom.us/profile', { waitUntil: 'domcontentloaded', timeout: 12000 });
-      const currentUrl = this.page.url();
-      if (!currentUrl.includes('signin') && !currentUrl.includes('login') && currentUrl.includes('profile')) {
-        log.info(
-          { meetingId: this.meetingId },
-          '✅ Bot is already logged into Zoom account permanently (persistent profile active)',
-        );
-        return;
-      }
-    } catch {}
-
-    // 2. Perform automated login if credentials are provided in .env
     const email = process.env['ZOOM_BOT_EMAIL'];
     const password = process.env['ZOOM_BOT_PASSWORD'];
 
+    // If no credentials in .env, persistent profile session is already active
     if (!email || !password) {
-      log.info({ meetingId: this.meetingId }, 'Using persistent browser profile session');
       return;
     }
 
-    log.info({ meetingId: this.meetingId }, 'Logging into Zoom account and saving persistent session...');
+    log.info({ meetingId: this.meetingId }, 'Logging into Zoom account using configured credentials...');
     try {
       await this.page.goto('https://zoom.us/signin', { waitUntil: 'domcontentloaded', timeout: 30000 });
       await new Promise((res) => setTimeout(res, 2000));
@@ -399,7 +385,6 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
         await context.overridePermissions(origin, ['microphone', 'camera']).catch(() => {});
       }
 
-      // Attempt to log in if credentials are provided
       await this.loginToZoom();
 
       // Initialize screen recorder (optimized for ≤2 cores)

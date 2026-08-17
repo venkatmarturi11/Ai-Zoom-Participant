@@ -623,20 +623,32 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
       }
     }
 
+    let isRefreshing = false;
     function refreshScreen() {
-      if (!autoRefresh) return;
+      if (!autoRefresh || isRefreshing) return;
+      isRefreshing = true;
       const t = Date.now();
-      screenImg.src = apiUrl('/api/live/screen?t=' + t);
-      document.getElementById('lastUpdateOverlay').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+      const tempImg = new Image();
+      tempImg.onload = () => {
+        screenImg.src = tempImg.src;
+        document.getElementById('lastUpdateOverlay').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+        isRefreshing = false;
+      };
+      tempImg.onerror = () => {
+        isRefreshing = false;
+      };
+      tempImg.src = apiUrl('/api/live/screen?t=' + t);
     }
 
     async function forceCapture() {
       try {
         const res = await fetch(apiUrl('/api/live/screenshot'), { method: 'POST' });
-        if (res.ok) {
+        if (res.ok && res.status === 200) {
           const blob = await res.blob();
-          screenImg.src = URL.createObjectURL(blob);
-          document.getElementById('lastUpdateOverlay').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+          if (blob && blob.size > 0) {
+            screenImg.src = URL.createObjectURL(blob);
+            document.getElementById('lastUpdateOverlay').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+          }
         }
       } catch {}
     }
