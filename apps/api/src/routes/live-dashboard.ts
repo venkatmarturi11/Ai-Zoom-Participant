@@ -3,6 +3,30 @@ import { meetingService } from '@zoom-assistant/orchestrator';
 import { recordingRepo } from '@zoom-assistant/database';
 
 export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
+
+  /**
+   * Verify admin API key for programmer-only endpoints.
+   * Checks X-Admin-Key header or ?key= query parameter.
+   * If ADMIN_API_KEY is not set, all requests are allowed (dev mode).
+   */
+  function verifyAdminKey(request: any, reply: any): boolean {
+    const adminKey = process.env['ADMIN_API_KEY']?.trim();
+    if (!adminKey) return true; // No key configured — allow all (dev mode)
+
+    const headerKey = request.headers['x-admin-key'] as string | undefined;
+    const queryKey = (request.query as any)?.key as string | undefined;
+
+    if (headerKey === adminKey || queryKey === adminKey) {
+      return true;
+    }
+
+    reply.status(403).send({
+      error: 'Forbidden',
+      message: 'Invalid or missing admin API key. Recordings are programmer-only.',
+    });
+    return false;
+  }
+
   /**
    * WS /api/live/control — WebSocket endpoint for Human-in-the-Loop browser control
    */
@@ -11,7 +35,7 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
       try {
         const event = JSON.parse(message.toString());
         await meetingService.dispatchControlEvent(event);
-      } catch (err) {
+      } catch {
         // ignore invalid messages
       }
     });
@@ -19,16 +43,21 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
 
   /**
    * GET /api/recordings — List all recorded videos saved in PostgreSQL database
+   * 🔐 Requires admin API key (programmer-only)
    */
-  fastify.get('/api/recordings', async (_request, reply) => {
+  fastify.get('/api/recordings', async (request, reply) => {
+    if (!verifyAdminKey(request, reply)) return;
     const list = await recordingRepo.listRecent(20);
     return reply.send(list);
   });
 
   /**
    * GET /api/recordings/:id/download — Stream / Download full MP4 video from database
+   * 🔐 Requires admin API key (programmer-only) OR a valid download token
    */
   fastify.get('/api/recordings/:id/download', async (request, reply) => {
+    if (!verifyAdminKey(request, reply)) return;
+
     const { id } = request.params as { id: string };
     const rec = await recordingRepo.findById(id);
     if (!rec) {
@@ -53,6 +82,19 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   /**
+   * POST /api/live/screenshot — Force-capture a fresh screenshot immediately
+   */
+  fastify.post('/api/live/screenshot', async (_request, reply) => {
+    const screenshot = await meetingService.getActiveMeetingScreenshot();
+    if (screenshot && screenshot.length > 0) {
+      reply.header('Cache-Control', 'no-cache');
+      reply.type('image/jpeg');
+      return reply.send(screenshot);
+    }
+    return reply.status(204).send();
+  });
+
+  /**
    * GET /api/live/screen — Live JPEG image stream of the headless bot's browser
    */
   fastify.get('/api/live/screen', async (_request, reply) => {
@@ -70,31 +112,27 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
     // Return clean SVG placeholder when idle
     reply.type('image/svg+xml');
     const svg = `
-      <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+      <svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
         <defs>
           <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stop-color="#0f172a"/>
+            <stop offset="0%" stop-color="#0a0e1a"/>
             <stop offset="100%" stop-color="#1e293b"/>
           </linearGradient>
-          <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
-            <feGaussianBlur stdDeviation="8" result="blur"/>
-            <feComposite in="SourceGraphic" in2="blur" operator="over"/>
-          </filter>
         </defs>
         <rect width="100%" height="100%" fill="url(#bg)"/>
-        <circle cx="640" cy="300" r="64" fill="#3b82f6" opacity="0.15"/>
-        <circle cx="640" cy="300" r="48" fill="#3b82f6" opacity="0.25"/>
-        <path d="M620 280 L660 300 L620 320 Z" fill="#60a5fa" filter="url(#glow)"/>
-        <text x="640" y="410" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="26" font-weight="600" fill="#f8fafc" text-anchor="middle">
+        <circle cx="320" cy="150" r="36" fill="#3b82f6" opacity="0.2"/>
+        <circle cx="320" cy="150" r="24" fill="#3b82f6" opacity="0.4"/>
+        <path d="M312 138 L334 150 L312 162 Z" fill="#60a5fa"/>
+        <text x="320" y="215" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="16" font-weight="600" fill="#f8fafc" text-anchor="middle">
           Headless Browser is Idle
         </text>
-        <text x="640" y="450" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="16" fill="#94a3b8" text-anchor="middle">
-          Send a Zoom link to your Telegram Bot to start attending &amp; recording live!
+        <text x="320" y="240" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" fill="#94a3b8" text-anchor="middle">
+          Send a Zoom link to Telegram Bot to join &amp; record live!
         </text>
-        <rect x="510" y="490" width="260" height="40" rx="20" fill="#1e293b" stroke="#334155" stroke-width="1.5"/>
-        <circle cx="530" cy="510" r="5" fill="#10b981"/>
-        <text x="548" y="516" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="500" fill="#cbd5e1">
-          Telegram Bot Online &amp; Ready
+        <rect x="230" y="265" width="180" height="28" rx="14" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+        <circle cx="245" cy="279" r="4" fill="#10b981"/>
+        <text x="257" y="283" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="500" fill="#cbd5e1">
+          Telegram Bot Online
         </text>
       </svg>
     `;
@@ -103,6 +141,8 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
 
   /**
    * GET / — Live Visual Monitoring & Diagnostic Dashboard
+   * Full-screen live view of the headless browser with activity log,
+   * status indicators, and remote control. Mobile-friendly.
    */
   fastify.get('/', async (_request, reply) => {
     const html = `
@@ -110,422 +150,244 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Zoom Participant Bot — Live Screen & Diagnostics</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Zoom Bot — Live Screen & Diagnostics</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg-dark: #090d16;
-      --card-bg: rgba(18, 26, 43, 0.75);
-      --card-border: rgba(255, 255, 255, 0.08);
-      --accent-blue: #3b82f6;
-      --accent-cyan: #06b6d4;
-      --accent-green: #10b981;
-      --accent-yellow: #f59e0b;
-      --accent-red: #ef4444;
-      --text-main: #f8fafc;
-      --text-muted: #94a3b8;
+      --bg: #090d16;
+      --card: rgba(18, 26, 43, 0.85);
+      --border: rgba(255, 255, 255, 0.08);
+      --blue: #3b82f6;
+      --cyan: #06b6d4;
+      --green: #10b981;
+      --yellow: #f59e0b;
+      --red: #ef4444;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --mono: 'JetBrains Mono', monospace;
     }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
+    * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
-      background: radial-gradient(circle at 50% 0%, #172554 0%, var(--bg-dark) 60%);
-      color: var(--text-main);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: radial-gradient(circle at 50% 0%, #172554 0%, var(--bg) 70%);
+      color: var(--text);
       min-height: 100vh;
-      padding: 24px;
       display: flex;
       flex-direction: column;
-      align-items: center;
+      padding: 16px;
     }
-
     .container {
       width: 100%;
       max-width: 1320px;
+      margin: 0 auto;
       display: flex;
       flex-direction: column;
-      gap: 20px;
+      gap: 16px;
+      flex: 1;
     }
-
-    header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 18px 24px;
-      background: var(--card-bg);
-      backdrop-filter: blur(16px);
-      border: 1px solid var(--card-border);
-      border-radius: 18px;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+    .header {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 14px 20px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      backdrop-filter: blur(12px);
     }
-
-    .logo-group {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-    }
-
-    .logo-badge {
-      width: 44px;
-      height: 44px;
-      border-radius: 12px;
-      background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 22px;
-      box-shadow: 0 0 20px rgba(59, 130, 246, 0.4);
-    }
-
-    .logo-text h1 {
+    .header-left { display: flex; align-items: center; gap: 12px; }
+    .logo {
+      width: 40px; height: 40px; border-radius: 10px;
+      background: linear-gradient(135deg, var(--blue), var(--cyan));
+      display: flex; align-items: center; justify-content: center;
       font-size: 20px;
-      font-weight: 700;
-      letter-spacing: -0.02em;
-      background: linear-gradient(to right, #ffffff, #93c5fd);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
+      box-shadow: 0 0 16px rgba(59,130,246,0.4);
     }
-
-    .logo-text p {
-      font-size: 13px;
-      color: var(--text-muted);
+    .header h1 { font-size: 17px; font-weight: 700; }
+    .header p { font-size: 12px; color: var(--muted); }
+    .header-right { display: flex; align-items: center; gap: 10px; }
+    .pill {
+      display: flex; align-items: center; gap: 6px;
+      padding: 6px 14px; border-radius: 20px;
+      font-size: 12px; font-weight: 600;
     }
+    .pill-green { background: rgba(16,185,129,0.15); color: #34d399; border: 1px solid rgba(16,185,129,0.3); }
+    .pill-red { background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid rgba(239,68,68,0.3); }
+    .pill-yellow { background: rgba(245,158,11,0.15); color: #fbbf24; border: 1px solid rgba(245,158,11,0.3); }
+    .pill-blue { background: rgba(59,130,246,0.15); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; animation: pulse 1.5s infinite; }
+    .dot-green { background: var(--green); box-shadow: 0 0 8px var(--green); }
+    @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.4;transform:scale(0.85)} }
 
-    .header-actions {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-    }
-
-    .status-pill {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 6px 14px;
-      background: rgba(16, 185, 129, 0.12);
-      border: 1px solid rgba(16, 185, 129, 0.3);
-      border-radius: 20px;
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--accent-green);
-    }
-
-    .status-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--accent-green);
-      box-shadow: 0 0 10px var(--accent-green);
-      animation: pulse 2s infinite;
-    }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.4; transform: scale(0.85); }
-    }
-
-    .btn {
-      padding: 8px 16px;
-      border-radius: 10px;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-      border: none;
-      transition: all 0.2s ease;
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      text-decoration: none;
-    }
-
-    .btn-primary {
-      background: linear-gradient(135deg, #2563eb, #3b82f6);
-      color: #fff;
-      box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);
-    }
-
-    .btn-primary:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 6px 18px rgba(37, 99, 235, 0.45);
-    }
-
-    .btn-secondary {
-      background: rgba(255, 255, 255, 0.06);
-      color: var(--text-main);
-      border: 1px solid var(--card-border);
-    }
-
-    .btn-secondary:hover {
-      background: rgba(255, 255, 255, 0.1);
-    }
-
-    /* Main Grid */
     .grid {
       display: grid;
-      grid-template-columns: 1fr 340px;
-      gap: 20px;
+      grid-template-columns: 1fr 360px;
+      gap: 16px;
+      flex: 1;
+    }
+    @media (max-width: 960px) {
+      .grid { grid-template-columns: 1fr; }
     }
 
-    @media (max-width: 1024px) {
-      .grid {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    /* Screen Card */
     .screen-card {
-      background: var(--card-bg);
-      backdrop-filter: blur(16px);
-      border: 1px solid var(--card-border);
-      border-radius: 20px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 18px;
       overflow: hidden;
       display: flex;
       flex-direction: column;
       box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
     }
-
     .card-header {
-      padding: 16px 20px;
-      border-bottom: 1px solid var(--card-border);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
+      padding: 12px 18px;
+      border-bottom: 1px solid var(--border);
+      display: flex; justify-content: space-between; align-items: center;
     }
-
     .card-title {
-      font-size: 15px;
-      font-weight: 600;
-      display: flex;
-      align-items: center;
-      gap: 8px;
+      font-size: 14px; font-weight: 600;
+      display: flex; align-items: center; gap: 8px;
     }
-
     .live-tag {
-      background: #ef4444;
-      color: white;
-      font-size: 11px;
-      font-weight: 700;
-      padding: 2px 8px;
-      border-radius: 6px;
+      background: var(--red); color: white;
+      font-size: 10px; font-weight: 800;
+      padding: 2px 7px; border-radius: 4px;
       letter-spacing: 0.05em;
-      animation: pulse 1.5s infinite;
+      animation: pulse 1.2s infinite;
     }
-
+    .rec-tag {
+      background: rgba(239,68,68,0.2); color: #f87171;
+      font-size: 10px; font-weight: 700;
+      padding: 2px 7px; border-radius: 4px;
+      display: inline-flex; align-items: center; gap: 4px;
+    }
     .screen-viewport {
       position: relative;
       width: 100%;
       background: #000;
       aspect-ratio: 16 / 9;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      display: flex; align-items: center; justify-content: center;
       overflow: hidden;
     }
-
     .screen-image {
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-      display: block;
-      transition: opacity 0.2s ease;
+      width: 100%; height: 100%; object-fit: contain; display: block;
     }
-
     .screen-overlay {
-      position: absolute;
-      bottom: 16px;
-      left: 16px;
+      position: absolute; bottom: 12px; left: 12px;
       background: rgba(0, 0, 0, 0.75);
       backdrop-filter: blur(10px);
-      padding: 8px 14px;
-      border-radius: 10px;
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      font-size: 12px;
-      font-family: 'JetBrains Mono', monospace;
+      padding: 6px 12px; border-radius: 8px;
+      font-size: 11px; font-family: var(--mono);
       color: #93c5fd;
-      display: flex;
-      gap: 16px;
+      display: flex; gap: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
     }
+    .btn {
+      padding: 6px 14px; border-radius: 8px; font-size: 12px; font-weight: 600;
+      cursor: pointer; border: none; transition: all 0.2s ease;
+      display: inline-flex; align-items: center; gap: 6px;
+      text-decoration: none; font-family: 'Inter', sans-serif;
+    }
+    .btn-primary { background: linear-gradient(135deg, #2563eb, #3b82f6); color: #fff; }
+    .btn-secondary { background: rgba(255, 255, 255, 0.06); color: var(--text); border: 1px solid var(--border); }
+    .btn-secondary:hover { background: rgba(255, 255, 255, 0.12); }
+    .btn-warning { background: var(--yellow); color: #000; font-weight: 700; }
 
-    /* Sidebar Stats */
     .sidebar {
-      display: flex;
-      flex-direction: column;
-      gap: 20px;
+      display: flex; flex-direction: column; gap: 16px;
     }
-
     .panel {
-      background: var(--card-bg);
-      backdrop-filter: blur(16px);
-      border: 1px solid var(--card-border);
-      border-radius: 20px;
-      padding: 20px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 16px;
       box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
     }
-
     .panel h2 {
-      font-size: 16px;
-      font-weight: 700;
-      margin-bottom: 14px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
+      font-size: 14px; font-weight: 700; margin-bottom: 12px;
+      display: flex; align-items: center; gap: 8px;
     }
-
     .stat-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 10px 0;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-      font-size: 13px;
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 8px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      font-size: 12px;
     }
+    .stat-row:last-child { border-bottom: none; }
+    .stat-label { color: var(--muted); }
+    .stat-value { font-family: var(--mono); font-weight: 600; color: #fff; font-size: 12px; }
 
-    .stat-row:last-child {
-      border-bottom: none;
-    }
-
-    .stat-label {
-      color: var(--text-muted);
-    }
-
-    .stat-value {
-      font-family: 'JetBrains Mono', monospace;
-      font-weight: 600;
-      color: #ffffff;
-    }
-
-    .badge-status {
-      padding: 3px 10px;
-      border-radius: 12px;
+    .log-panel {
+      max-height: 220px; overflow-y: auto;
+      display: flex; flex-direction: column; gap: 6px;
       font-size: 11px;
-      font-weight: 700;
-      text-transform: uppercase;
     }
+    .log-item {
+      padding: 6px 10px; background: rgba(255,255,255,0.02);
+      border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);
+      display: flex; gap: 8px; align-items: flex-start;
+      line-height: 1.35;
+    }
+    .log-time { color: var(--muted); font-family: var(--mono); font-size: 10px; white-space: nowrap; }
 
-    .badge-connected { background: rgba(16, 185, 129, 0.2); color: #34d399; }
-    .badge-waiting { background: rgba(245, 158, 11, 0.2); color: #fbbf24; }
-    .badge-connecting { background: rgba(59, 130, 246, 0.2); color: #60a5fa; }
-    .badge-idle { background: rgba(148, 163, 184, 0.2); color: #cbd5e1; }
-
-    .help-card {
+    .help-box {
       background: linear-gradient(135deg, rgba(30, 41, 59, 0.6), rgba(15, 23, 42, 0.8));
       border: 1px solid rgba(59, 130, 246, 0.2);
-      border-radius: 16px;
-      padding: 16px;
-      font-size: 13px;
-      line-height: 1.5;
-      color: #cbd5e1;
+      border-radius: 12px; padding: 12px; font-size: 12px; line-height: 1.45; color: #cbd5e1;
     }
-
-    .help-card strong {
-      color: #93c5fd;
-      display: block;
-      margin-bottom: 4px;
-    }
-
-    /* Auto-refresh Switch */
-    .toggle-group {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-size: 13px;
-      color: var(--text-muted);
-    }
-
-    .switch {
-      position: relative;
-      display: inline-block;
-      width: 40px;
-      height: 22px;
-    }
-
-    .switch input { opacity: 0; width: 0; height: 0; }
-
-    .slider {
-      position: absolute;
-      cursor: pointer;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background-color: rgba(255, 255, 255, 0.1);
-      transition: .3s;
-      border-radius: 22px;
-      border: 1px solid var(--card-border);
-    }
-
-    .slider:before {
-      position: absolute;
-      content: "";
-      height: 16px; width: 16px;
-      left: 2px; bottom: 2px;
-      background-color: white;
-      transition: .3s;
-      border-radius: 50%;
-    }
-
-    input:checked + .slider { background-color: var(--accent-blue); }
-    input:checked + .slider:before { transform: translateX(18px); }
+    .help-box strong { color: #93c5fd; display: block; margin-bottom: 4px; }
   </style>
 </head>
 <body>
   <div class="container">
-    <header>
-      <div class="logo-group">
-        <div class="logo-badge">🎥</div>
-        <div class="logo-text">
-          <h1>Zoom Participant Live Monitor</h1>
-          <p>Real-Time Visual Screencast &amp; Diagnostic Center</p>
+    <div class="header">
+      <div class="header-left">
+        <div class="logo">🎥</div>
+        <div>
+          <h1>Zoom Bot Monitor</h1>
+          <p>Real-Time Visual Screencast &amp; Activity Log</p>
         </div>
       </div>
-      <div class="header-actions">
-        <div class="status-pill">
-          <div class="status-dot"></div>
+      <div class="header-right">
+        <div class="pill pill-green" id="headerPill">
+          <div class="dot dot-green"></div>
           <span id="headerStatusText">Service Active</span>
         </div>
-        <button class="btn btn-secondary" onclick="refreshScreen()">🔄 Refresh</button>
+        <button class="btn btn-secondary" onclick="forceCapture()">📸 Capture Now</button>
       </div>
-    </header>
+    </div>
 
     <div class="grid">
       <!-- Main Visual Screen -->
       <div class="screen-card">
         <div class="card-header">
           <div class="card-title">
-            <span>📺 Headless Browser Display (1280x720)</span>
-            <span class="live-tag" id="liveTag">LIVE</span>
+            <span>📺 Headless Browser Display (640×360)</span>
+            <span class="live-tag">LIVE</span>
+            <span class="rec-tag" id="recBadge" style="display:none">● REC</span>
           </div>
-          <div class="toggle-group">
-            <button id="takeControlBtn" class="btn btn-primary" style="display: none; background: #f59e0b; box-shadow: none;">⚠️ Needs Help: Take Control</button>
-            <span>Live Stream</span>
-            <label class="switch">
-              <input type="checkbox" id="autoRefreshToggle" checked>
-              <span class="slider"></span>
-            </label>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <button id="takeControlBtn" class="btn btn-warning" style="display: none;" onclick="toggleControl()">⚠️ Take Control</button>
+            <button class="btn btn-secondary" id="pauseBtn" onclick="togglePause()">⏸ Pause</button>
           </div>
         </div>
 
-        <div class="screen-viewport">
-          <img id="liveScreen" class="screen-image" src="/api/live/screen" alt="Zoom Bot Live Screencast">
+        <div class="screen-viewport" id="screenContainer">
+          <img id="liveScreen" class="screen-image" src="/api/live/screen" alt="Zoom Bot Screen">
           <div class="screen-overlay">
-            <span id="fpsOverlay">FPS: 5.0</span>
             <span id="framesOverlay">Frames: 0</span>
+            <span id="durationOverlay">Elapsed: 00:00:00</span>
             <span id="lastUpdateOverlay">Updated: Just now</span>
           </div>
         </div>
       </div>
 
-      <!-- Diagnostic Sidebar -->
+      <!-- Sidebar -->
       <div class="sidebar">
         <div class="panel">
           <h2>📊 Live Session State</h2>
           <div class="stat-row">
-            <span class="stat-label">Bot State</span>
-            <span id="stateBadge" class="badge-status badge-idle">IDLE</span>
+            <span class="stat-label">Bot Status</span>
+            <span class="stat-value" id="statusVal" style="color: #34d399">IDLE</span>
           </div>
           <div class="stat-row">
             <span class="stat-label">Meeting ID</span>
@@ -534,6 +396,10 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
           <div class="stat-row">
             <span class="stat-label">Display Name</span>
             <span class="stat-value" id="displayNameVal">—</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">Duration</span>
+            <span class="stat-value" id="durationVal">00:00:00</span>
           </div>
           <div class="stat-row">
             <span class="stat-label">Frames Captured</span>
@@ -545,150 +411,155 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
           </div>
         </div>
 
-        <div class="help-card">
-          <strong>💡 Diagnostic Guide:</strong>
-          • If you see the <i>Waiting Room</i> screen above, click <b>Admit</b> in your Zoom host window.<br>
-          • The bot will join audio and begin recording automatically.<br>
-          • Send <code>/stop</code> in Telegram at any time to receive the finalized MP4 recording.
+        <!-- Activity Log -->
+        <div class="panel">
+          <h2>📋 Live Activity Log</h2>
+          <div class="log-panel" id="logList">
+            <div class="log-item">
+              <span class="log-time">${new Date().toLocaleTimeString()}</span>
+              <span>🟢 Monitoring dashboard initialized. Ready for Zoom sessions.</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="help-box">
+          <strong>💡 How it works:</strong>
+          1. Send a Zoom link in Telegram.<br>
+          2. The bot joins and records everything.<br>
+          3. Watch the live screen above in real-time.<br>
+          4. Send <code>/stop</code> in Telegram to save video.
         </div>
       </div>
     </div>
 
-    <!-- Saved Database Recordings Section -->
-    <div class="panel" style="margin-top: 20px;">
-      <h2>📼 Saved Video Recordings (Stored in PostgreSQL Database)</h2>
-      <div id="recordingsList" style="display: grid; gap: 10px; margin-top: 12px;">
-        <div style="color: var(--text-muted); font-size: 13px;">Loading database recordings...</div>
+    <!-- Saved Recordings -->
+    <div class="panel">
+      <h2>📼 Saved Database Recordings</h2>
+      <div id="recordingsList" style="display: grid; gap: 8px; margin-top: 8px;">
+        <div style="color: var(--muted); font-size: 12px;">Loading database recordings...</div>
       </div>
     </div>
   </div>
 
   <script>
     const screenImg = document.getElementById('liveScreen');
-    const autoRefreshToggle = document.getElementById('autoRefreshToggle');
-    const stateBadge = document.getElementById('stateBadge');
-    const meetingIdVal = document.getElementById('meetingIdVal');
-    const displayNameVal = document.getElementById('displayNameVal');
-    const frameCountVal = document.getElementById('frameCountVal');
-    const framesOverlay = document.getElementById('framesOverlay');
-    const lastUpdateOverlay = document.getElementById('lastUpdateOverlay');
-    const recorderStatusVal = document.getElementById('recorderStatusVal');
-    const takeControlBtn = document.getElementById('takeControlBtn');
-
+    const logList = document.getElementById('logList');
+    let autoRefresh = true;
     let isControlling = false;
     let ws = null;
+    let lastState = 'IDLE';
+    let sessionStartTime = null;
 
-    function initWebSocket() {
-      if (ws) return;
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      ws = new WebSocket(protocol + '//' + window.location.host + '/api/live/control');
-      ws.onopen = () => console.log('WebSocket connected');
-      ws.onclose = () => { console.log('WebSocket disconnected'); ws = null; };
+    function addLog(icon, text) {
+      const time = new Date().toLocaleTimeString();
+      const div = document.createElement('div');
+      div.className = 'log-item';
+      div.innerHTML = '<span class="log-time">' + time + '</span><span>' + icon + ' ' + text + '</span>';
+      logList.prepend(div);
+      while (logList.children.length > 30) logList.removeChild(logList.lastChild);
     }
-
-    takeControlBtn.addEventListener('click', () => {
-      isControlling = !isControlling;
-      if (isControlling) {
-        initWebSocket();
-        takeControlBtn.style.background = '#10b981';
-        takeControlBtn.textContent = '✅ Controlling (Click to Release)';
-        screenImg.style.cursor = 'crosshair';
-      } else {
-        takeControlBtn.style.background = '#f59e0b';
-        takeControlBtn.textContent = '⚠️ Needs Help: Take Control';
-        screenImg.style.cursor = 'default';
-      }
-    });
-
-    function sendWsEvent(event) {
-      if (ws && ws.readyState === 1 && isControlling) {
-        ws.send(JSON.stringify(event));
-      }
-    }
-
-    screenImg.addEventListener('mousedown', (e) => {
-      if (!isControlling) return;
-      e.preventDefault();
-      const rect = screenImg.getBoundingClientRect();
-      sendWsEvent({ type: 'mousedown', x: (e.clientX - rect.left) * (1280 / rect.width), y: (e.clientY - rect.top) * (720 / rect.height) });
-    });
-    screenImg.addEventListener('mouseup', (e) => {
-      if (!isControlling) return;
-      e.preventDefault();
-      const rect = screenImg.getBoundingClientRect();
-      sendWsEvent({ type: 'mouseup', x: (e.clientX - rect.left) * (1280 / rect.width), y: (e.clientY - rect.top) * (720 / rect.height) });
-    });
-    screenImg.addEventListener('mousemove', (e) => {
-      if (!isControlling) return;
-      const rect = screenImg.getBoundingClientRect();
-      sendWsEvent({ type: 'mousemove', x: (e.clientX - rect.left) * (1280 / rect.width), y: (e.clientY - rect.top) * (720 / rect.height) });
-    });
-    screenImg.addEventListener('click', (e) => {
-      if (!isControlling) return;
-      e.preventDefault();
-      const rect = screenImg.getBoundingClientRect();
-      sendWsEvent({ type: 'click', x: (e.clientX - rect.left) * (1280 / rect.width), y: (e.clientY - rect.top) * (720 / rect.height) });
-    });
-    
-    document.addEventListener('keydown', (e) => {
-      if (!isControlling) return;
-      e.preventDefault();
-      sendWsEvent({ type: 'keydown', key: e.key });
-    });
-    document.addEventListener('keyup', (e) => {
-      if (!isControlling) return;
-      e.preventDefault();
-      sendWsEvent({ type: 'keyup', key: e.key });
-    });
 
     function refreshScreen() {
-      const timestamp = Date.now();
-      screenImg.src = '/api/live/screen?t=' + timestamp;
-      lastUpdateOverlay.textContent = 'Updated: ' + new Date().toLocaleTimeString();
+      if (!autoRefresh) return;
+      const t = Date.now();
+      screenImg.src = '/api/live/screen?t=' + t;
+      document.getElementById('lastUpdateOverlay').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+    }
+
+    async function forceCapture() {
+      addLog('📸', 'Capturing fresh screenshot on demand...');
+      try {
+        const res = await fetch('/api/live/screenshot', { method: 'POST' });
+        if (res.ok) {
+          const blob = await res.blob();
+          screenImg.src = URL.createObjectURL(blob);
+          document.getElementById('lastUpdateOverlay').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+          addLog('✅', 'Fresh screenshot captured');
+        } else {
+          addLog('⚠️', 'No active browser session');
+        }
+      } catch {
+        addLog('❌', 'Screenshot capture failed');
+      }
+    }
+
+    function togglePause() {
+      autoRefresh = !autoRefresh;
+      document.getElementById('pauseBtn').textContent = autoRefresh ? '⏸ Pause' : '▶ Resume';
+      addLog(autoRefresh ? '▶️' : '⏸️', autoRefresh ? 'Screen stream resumed' : 'Screen stream paused');
     }
 
     async function pollStatus() {
       try {
         const res = await fetch('/api/live/status');
-        if (res.ok) {
-          const data = await res.json();
-          if (data.active) {
-            meetingIdVal.textContent = data.zoomMeetingId || '—';
-            displayNameVal.textContent = data.displayName || 'Assistant';
-            frameCountVal.textContent = data.frameCount || 0;
-            framesOverlay.textContent = 'Frames: ' + (data.frameCount || 0);
-            recorderStatusVal.textContent = '🟢 Recording Active';
+        if (!res.ok) return;
+        const d = await res.json();
 
-            if (data.status === 'CONNECTED') {
-              stateBadge.textContent = 'CONNECTED';
-              stateBadge.className = 'badge-status badge-connected';
-            } else if (data.status === 'WAITING_ROOM') {
-              stateBadge.textContent = 'WAITING ROOM';
-              stateBadge.className = 'badge-status badge-waiting';
-            } else {
-              stateBadge.textContent = 'CONNECTING';
-              stateBadge.className = 'badge-status badge-connecting';
-            }
+        const statusVal = document.getElementById('statusVal');
+        const recBadge = document.getElementById('recBadge');
+        const takeControlBtn = document.getElementById('takeControlBtn');
 
-            if (data.needsHumanInteraction && !isControlling) {
-              takeControlBtn.style.display = 'inline-flex';
-            } else if (!data.needsHumanInteraction && !isControlling) {
-              takeControlBtn.style.display = 'none';
-            }
+        if (d.active) {
+          if (!sessionStartTime) sessionStartTime = Date.now();
+          const elapsed = Date.now() - sessionStartTime;
+          const h = String(Math.floor(elapsed/3600000)).padStart(2,'0');
+          const m = String(Math.floor((elapsed%3600000)/60000)).padStart(2,'0');
+          const s = String(Math.floor((elapsed%60000)/1000)).padStart(2,'0');
+          const durStr = h+':'+m+':'+s;
+
+          document.getElementById('meetingIdVal').textContent = d.zoomMeetingId || '—';
+          document.getElementById('displayNameVal').textContent = d.displayName || 'Assistant';
+          document.getElementById('frameCountVal').textContent = d.frameCount || 0;
+          document.getElementById('framesOverlay').textContent = 'Frames: ' + (d.frameCount || 0);
+          document.getElementById('durationVal').textContent = durStr;
+          document.getElementById('durationOverlay').textContent = 'Elapsed: ' + durStr;
+          document.getElementById('recorderStatusVal').textContent = '🟢 Recording Active';
+          document.getElementById('recorderStatusVal').style.color = '#34d399';
+          recBadge.style.display = 'inline-flex';
+
+          if (d.status === 'CONNECTED') {
+            statusVal.textContent = 'CONNECTED';
+            statusVal.style.color = '#34d399';
+            if (lastState !== 'CONNECTED') addLog('✅', 'Bot is inside the Zoom meeting room! Screen recording active.');
+          } else if (d.status === 'WAITING_ROOM') {
+            statusVal.textContent = 'WAITING ROOM';
+            statusVal.style.color = '#fbbf24';
+            if (lastState !== 'WAITING_ROOM') addLog('⏳', 'Bot is waiting in the host waiting room. Host must click Admit.');
           } else {
-            meetingIdVal.textContent = '—';
-            displayNameVal.textContent = '—';
-            frameCountVal.textContent = '0';
-            framesOverlay.textContent = 'Frames: 0';
-            recorderStatusVal.textContent = 'Ready';
-            stateBadge.textContent = 'IDLE';
-            stateBadge.className = 'badge-status badge-idle';
-            takeControlBtn.style.display = 'none';
+            statusVal.textContent = 'CONNECTING';
+            statusVal.style.color = '#60a5fa';
+            if (lastState !== 'CONNECTING') addLog('🔄', 'Launching headless browser and navigating to Zoom meeting...');
           }
+
+          if (d.needsHumanInteraction && !isControlling) {
+            takeControlBtn.style.display = 'inline-flex';
+            if (lastState !== 'NEEDS_HELP') addLog('🚨', 'Bot encountered CAPTCHA or Login check! Click "Take Control" to assist.');
+            lastState = 'NEEDS_HELP';
+          } else {
+            if (!isControlling) takeControlBtn.style.display = 'none';
+            lastState = d.status;
+          }
+        } else {
+          sessionStartTime = null;
+          document.getElementById('meetingIdVal').textContent = '—';
+          document.getElementById('displayNameVal').textContent = '—';
+          document.getElementById('frameCountVal').textContent = '0';
+          document.getElementById('framesOverlay').textContent = 'Frames: 0';
+          document.getElementById('durationVal').textContent = '00:00:00';
+          document.getElementById('durationOverlay').textContent = 'Elapsed: 00:00:00';
+          statusVal.textContent = 'IDLE';
+          statusVal.style.color = '#94a3b8';
+          document.getElementById('recorderStatusVal').textContent = 'Ready';
+          document.getElementById('recorderStatusVal').style.color = '#94a3b8';
+          recBadge.style.display = 'none';
+          takeControlBtn.style.display = 'none';
+
+          if (lastState && lastState !== 'IDLE') {
+            addLog('🔴', 'Meeting session ended. Recording saved to database.');
+          }
+          lastState = 'IDLE';
         }
-      } catch (err) {
-        console.warn('Status poll error', err);
-      }
+      } catch {}
     }
 
     async function loadRecordings() {
@@ -699,38 +570,70 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
         if (res.ok) {
           const items = await res.json();
           if (items.length === 0) {
-            container.innerHTML = '<div style="color: var(--text-muted); font-size: 13px;">No recorded meetings stored in database yet. Join and stop a meeting to view recordings here!</div>';
+            container.innerHTML = '<div style="color: var(--muted); font-size: 12px;">No recordings stored yet. Join and stop a meeting to view recordings here.</div>';
             return;
           }
           container.innerHTML = items.map(function(item) {
             var sizeMb = (item.fileSize / (1024 * 1024)).toFixed(2);
             var recDate = new Date(item.createdAt).toLocaleString();
-            return '<div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--card-border); border-radius: 12px;">' +
+            return '<div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border); border-radius: 10px;">' +
               '<div>' +
-                '<div style="font-weight: 600; font-size: 14px; color: #fff;">Zoom Meeting: <code>' + item.zoomMeetingId + '</code></div>' +
-                '<div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Size: ' + sizeMb + ' MB • Recorded: ' + recDate + '</div>' +
+                '<div style="font-weight: 600; font-size: 13px; color: #fff;">Zoom Meeting: <code>' + item.zoomMeetingId + '</code></div>' +
+                '<div style="font-size: 11px; color: var(--muted); margin-top: 2px;">Size: ' + sizeMb + ' MB • ' + recDate + '</div>' +
               '</div>' +
-              '<div style="display: flex; gap: 10px;">' +
-                '<a href="/api/recordings/' + item.id + '/download" target="_blank" class="btn btn-primary" style="font-size: 12px; padding: 6px 12px;">▶️ Watch / Download</a>' +
-              '</div>' +
+              '<a href="/api/recordings/' + item.id + '/download" target="_blank" class="btn btn-primary" style="font-size: 11px; padding: 5px 10px;">▶️ Download MP4</a>' +
             '</div>';
           }).join('');
+        } else if (res.status === 403) {
+          container.innerHTML = '<div style="color: var(--muted); font-size: 12px;">🔒 Recordings require programmer API key (ADMIN_API_KEY).</div>';
         }
-      } catch (e) {
-        container.innerHTML = '<div style="color: var(--text-muted); font-size: 13px;">Could not load database recordings.</div>';
+      } catch {
+        container.innerHTML = '<div style="color: var(--muted); font-size: 12px;">Could not load database recordings.</div>';
       }
     }
 
-    // Auto-refresh loop every 1 second
-    setInterval(() => {
-      if (autoRefreshToggle.checked) {
-        refreshScreen();
-        pollStatus();
-      }
-    }, 1000);
+    function initWebSocket() {
+      if (ws) return;
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      ws = new WebSocket(protocol + '//' + window.location.host + '/api/live/control');
+      ws.onopen = () => addLog('🔗', 'Remote control connection established');
+      ws.onclose = () => { ws = null; addLog('🔌', 'Remote control disconnected'); };
+    }
 
-    // Refresh recordings list every 10 seconds
-    setInterval(loadRecordings, 10000);
+    function toggleControl() {
+      isControlling = !isControlling;
+      const btn = document.getElementById('takeControlBtn');
+      if (isControlling) {
+        initWebSocket();
+        btn.textContent = '✅ Controlling (Click to Release)';
+        btn.className = 'btn btn-primary';
+        screenImg.style.cursor = 'crosshair';
+        addLog('🖱️', 'Control mode active — click the screen image to interact with Zoom');
+      } else {
+        btn.textContent = '⚠️ Take Control';
+        btn.className = 'btn btn-warning';
+        screenImg.style.cursor = 'default';
+        addLog('🖱️', 'Control released');
+      }
+    }
+
+    function sendWs(evt) {
+      if (ws && ws.readyState === 1 && isControlling) ws.send(JSON.stringify(evt));
+    }
+
+    screenImg.addEventListener('click', (e) => {
+      if (!isControlling) return;
+      e.preventDefault();
+      const rect = screenImg.getBoundingClientRect();
+      sendWs({ type:'click', x: (e.clientX-rect.left)*(640/rect.width), y: (e.clientY-rect.top)*(360/rect.height) });
+    });
+
+    setInterval(() => {
+      refreshScreen();
+      pollStatus();
+    }, 2000);
+
+    setInterval(loadRecordings, 12000);
 
     pollStatus();
     loadRecordings();

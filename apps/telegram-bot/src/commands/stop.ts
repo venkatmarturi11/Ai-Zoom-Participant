@@ -1,16 +1,13 @@
-import fs from 'node:fs';
-import { InputFile } from 'grammy';
 import type { BotContext } from '../bot.js';
+import { messages } from '../formatters/messages.js';
 import { userRepo, meetingRepo, auditRepo } from '@zoom-assistant/database';
-import { getMeetingRecordings, getValidAccessToken } from '@zoom-assistant/zoom';
-import { queueProducers } from '@zoom-assistant/queue';
 import { meetingService } from '@zoom-assistant/orchestrator';
 import { createLogger } from '@zoom-assistant/shared';
 
 const log = createLogger({ module: 'stop-command' });
 
 /**
- * /stop — Stop active meeting bot session immediately and deliver recording / duration summary
+ * /stop — Stop active meeting bot session, finalize recording, save to DB, send download link
  */
 export async function stopCommand(ctx: BotContext): Promise<void> {
   const telegramUserId = BigInt(ctx.from!.id);
@@ -22,7 +19,7 @@ export async function stopCommand(ctx: BotContext): Promise<void> {
       user = await userRepo.upsert(telegramUserId, ctx.from?.username);
     }
   } catch {
-    await ctx.reply('ℹ️ No active meeting session to stop.\n\nSend or paste any Zoom meeting link directly in chat to join a meeting!', { parse_mode: 'HTML' });
+    await ctx.reply('ℹ️ No active recording session to stop.\n\nSend a Zoom meeting link to start recording!', { parse_mode: 'HTML' });
     return;
   }
 
@@ -30,12 +27,12 @@ export async function stopCommand(ctx: BotContext): Promise<void> {
   try {
     activeMeetings = await meetingRepo.findActiveByUserId(user.id);
   } catch {
-    await ctx.reply('ℹ️ No active meeting session to stop.\n\nSend or paste any Zoom meeting link directly in chat to join a meeting!', { parse_mode: 'HTML' });
+    await ctx.reply('ℹ️ No active recording session to stop.\n\nSend a Zoom meeting link to start recording!', { parse_mode: 'HTML' });
     return;
   }
 
   if (activeMeetings.length === 0) {
-    await ctx.reply('ℹ️ No active meeting session to stop.\n\nSend or paste any Zoom meeting link directly in chat to join a meeting!', { parse_mode: 'HTML' });
+    await ctx.reply('ℹ️ No active recording session to stop.\n\nSend a Zoom meeting link to start recording!', { parse_mode: 'HTML' });
     return;
   }
 
@@ -44,126 +41,57 @@ export async function stopCommand(ctx: BotContext): Promise<void> {
     ? formatDuration(Date.now() - active.actualStart.getTime())
     : '00:00:00';
 
-  // Stop meeting session and capture local screen recording if active
-  let localRecordingPath: string | undefined;
-  let databaseDownloadUrl: string | undefined;
-  let videoBuffer: Buffer | undefined;
+  // Show "Stopping..." message
+  const stoppingMsg = await ctx.reply(
+    '⏳ <b>Stopping recording & saving video...</b>\n\n<i>Please wait while the recording is finalized and saved to database.</i>',
+    { parse_mode: 'HTML' },
+  );
+
+  // Stop meeting session and capture recording
+  let downloadUrl: string | undefined;
 
   try {
     const stopResult = await meetingService.stopMeeting(telegramUserId, active.id);
-    localRecordingPath = stopResult.recordingFilePath;
-    databaseDownloadUrl = stopResult.downloadUrl;
-    videoBuffer = stopResult.videoBuffer;
+    downloadUrl = stopResult.downloadUrl;
+
+    log.info(
+      { meetingId: active.id, downloadUrl, hasVideo: Boolean(stopResult.videoBuffer) },
+      'Meeting stopped and recording saved',
+    );
   } catch (err: any) {
     log.warn({ error: err?.message }, 'MeetingService.stopMeeting warning');
   }
 
+  // Log the stop action
   try {
     await auditRepo.log({
       userId: user.id,
       action: 'MEETING_STOPPED_MANUALLY',
-      metadata: { meetingId: active.id, duration: durationStr, downloadUrl: databaseDownloadUrl },
+      metadata: { meetingId: active.id, duration: durationStr, downloadUrl },
     }).catch(() => {});
   } catch {
     // ignore
   }
 
-  // 1. Deliver Instant High-Definition Screen Recording if available
-  let sentInstantVideo = false;
-  const rawBytes = videoBuffer || (localRecordingPath && fs.existsSync(localRecordingPath) ? fs.readFileSync(localRecordingPath) : undefined);
+  // Delete the "stopping" message
+  await ctx.api.deleteMessage(ctx.chat!.id, stoppingMsg.message_id).catch(() => {});
 
-  if (rawBytes && rawBytes.length > 0) {
-    if (rawBytes.length <= 50 * 1024 * 1024) {
-      try {
-        await ctx.replyWithVideo(new InputFile(rawBytes, `meeting-${active.zoomMeetingId}.mp4`), {
-          caption:
-            `🎬 <b>Meeting Screen Recording</b>\n\n` +
-            `📌 <b>Meeting ID:</b> <code>${active.zoomMeetingId}</code>\n` +
-            `⏱️ <b>Attended Duration:</b> <code>${durationStr}</code>\n` +
-            `📹 <b>Format:</b> High Definition MP4 Video\n` +
-            `💾 <b>Saved to Database:</b> ✅ Stored Permanently\n` +
-            (databaseDownloadUrl ? `📥 <a href="${databaseDownloadUrl}">Direct Web Download Link</a>\n\n` : '\n') +
-            `🤖 <i>Delivered instantly from meeting bot</i>`,
-          parse_mode: 'HTML',
-          supports_streaming: true,
-        });
-        sentInstantVideo = true;
-        log.info({ meetingId: active.id, sizeBytes: rawBytes.length }, 'Delivered instant MP4 video to user on /stop');
-      } catch (uploadErr: any) {
-        log.error({ error: uploadErr?.message }, 'Failed to upload instant video via replyWithVideo');
-      }
-    } else {
-      log.warn({ sizeBytes: rawBytes.length }, 'Video exceeds Telegram 50MB limit; database download link provided');
-    }
+  // Send final result with download link
+  if (downloadUrl) {
+    await ctx.reply(
+      messages.recordingSaved({
+        meetingId: active.zoomMeetingId,
+        duration: durationStr,
+        downloadUrl,
+      }),
+      { parse_mode: 'HTML', link_preview_options: { is_disabled: false } },
+    );
+  } else {
+    await ctx.reply(
+      messages.recordingNoVideo(active.zoomMeetingId, durationStr),
+      { parse_mode: 'HTML' },
+    );
   }
-
-  // Clean up local temp file
-  if (localRecordingPath && fs.existsSync(localRecordingPath)) {
-    try {
-      fs.unlinkSync(localRecordingPath);
-    } catch {
-      // ignore
-    }
-  }
-
-  // 2. Check for Zoom Cloud Recordings if instant video wasn't available
-  let recordingInfo = '';
-  if (databaseDownloadUrl && !sentInstantVideo) {
-    recordingInfo =
-      `\n🎬 <b>Video Recording (Stored in Database):</b>\n` +
-      `📥 <a href="${databaseDownloadUrl}">Click here to Watch & Download Full Video</a>\n`;
-  } else if (!sentInstantVideo) {
-    try {
-      const tokens = await getValidAccessToken(user.id).catch(() => null);
-      if (tokens?.accessToken) {
-        const recordings = await getMeetingRecordings(active.zoomMeetingId, tokens.accessToken);
-        if (recordings && recordings.recordingFiles.length > 0) {
-          const mp4Files = recordings.recordingFiles.filter((f) => f.fileType === 'MP4');
-          if (mp4Files.length > 0) {
-            const mainVideo = mp4Files[0]!;
-            recordingInfo =
-              `\n🎬 <b>Meeting Recording:</b>\n` +
-              `📹 <b>Format:</b> MP4 Video\n` +
-              (mainVideo.playUrl ? `▶️ <a href="${mainVideo.playUrl}">Watch Recording Online</a>\n` : '') +
-              (mainVideo.downloadUrl ? `💾 <a href="${mainVideo.downloadUrl}">Download MP4 Video</a>\n` : '');
-          } else if (recordings.shareUrl) {
-            recordingInfo = `\n🎬 <b>Recording Link:</b> <a href="${recordings.shareUrl}">View Meeting Recording</a>\n`;
-          }
-        } else {
-          recordingInfo = `\n📹 <b>Zoom Cloud Recording:</b> <i>Still processing on Zoom's servers — I'll message you here as soon as it's ready.</i>\n`;
-          try {
-            await queueProducers.enqueueRecordingCheck(
-              {
-                meetingId: active.id,
-                userId: user.id,
-                zoomMeetingId: active.zoomMeetingId,
-                telegramChatId: String(ctx.from!.id),
-                requestedAt: new Date().toISOString(),
-                attempt: 1,
-              },
-              5 * 60 * 1000,
-            );
-          } catch (enqueueErr: any) {
-            log.warn({ error: enqueueErr?.message }, 'Failed to enqueue recording check');
-          }
-        }
-      }
-    } catch (recErr: any) {
-      log.warn({ error: recErr.message }, 'Failed to check recordings on stop');
-    }
-  }
-
-  await ctx.reply(
-    `✅ <b>Meeting Session Ended!</b>\n\n` +
-    `📌 <b>Meeting ID:</b> <code>${active.zoomMeetingId}</code>\n` +
-    `⏱️ <b>Attended Duration:</b> <code>${durationStr}</code>\n` +
-    `🤖 <b>Status:</b> Completed & Cleaned Up\n` +
-    (sentInstantVideo
-      ? `\n🎥 <i>Your full meeting video recording was delivered above!</i>`
-      : recordingInfo) +
-    `\nThe assistant has finished the meeting. You can send another Zoom link anytime to start a new session!`,
-    { parse_mode: 'HTML', link_preview_options: { is_disabled: false } },
-  );
 }
 
 /**
@@ -181,7 +109,7 @@ export async function handleStopConfirm(ctx: BotContext, meetingId: string): Pro
 
   let durationStr = '00:00:00';
   let meetingIdStr = meetingId;
-  let localRecordingPath: string | undefined;
+  let downloadUrl: string | undefined;
 
   try {
     const meeting = await meetingRepo.findById(meetingId);
@@ -191,58 +119,35 @@ export async function handleStopConfirm(ctx: BotContext, meetingId: string): Pro
     }
 
     const stopResult = await meetingService.stopMeeting(telegramUserId, meetingId);
-    localRecordingPath = stopResult.recordingFilePath;
-    const databaseDownloadUrl = stopResult.downloadUrl;
-    const videoBuffer = stopResult.videoBuffer;
+    downloadUrl = stopResult.downloadUrl;
 
     await auditRepo.log({
       userId: user.id,
       action: 'MEETING_STOPPED_MANUALLY',
-      metadata: { meetingId, duration: durationStr, downloadUrl: databaseDownloadUrl },
+      metadata: { meetingId, duration: durationStr, downloadUrl },
     }).catch(() => {});
 
-    log.info({ meetingId, userId: user.id }, 'Meeting session stopped by user');
-
-    const rawBytes = videoBuffer || (localRecordingPath && fs.existsSync(localRecordingPath) ? fs.readFileSync(localRecordingPath) : undefined);
-
-    if (rawBytes && rawBytes.length > 0 && rawBytes.length <= 50 * 1024 * 1024) {
-      try {
-        await ctx.replyWithVideo(new InputFile(rawBytes, `meeting-${meetingIdStr}.mp4`), {
-          caption:
-            `🎬 <b>Meeting Screen Recording</b>\n\n` +
-            `📌 <b>Meeting ID:</b> <code>${meetingIdStr}</code>\n` +
-            `⏱️ <b>Attended Duration:</b> <code>${durationStr}</code>\n` +
-            `📹 <b>Format:</b> High Definition MP4 Video\n` +
-            `💾 <b>Saved to Database:</b> ✅ Stored Permanently\n` +
-            (databaseDownloadUrl ? `📥 <a href="${databaseDownloadUrl}">Direct Web Download Link</a>\n\n` : '\n') +
-            `🤖 <i>Delivered instantly from meeting bot</i>`,
-          parse_mode: 'HTML',
-          supports_streaming: true,
-        });
-      } catch (uploadErr: any) {
-        log.error({ error: uploadErr?.message }, 'Failed to upload video via callback');
-      }
-    }
+    log.info({ meetingId, userId: user.id, downloadUrl }, 'Meeting session stopped by user');
   } catch {
     // DB error, continue
   }
 
-  if (localRecordingPath && fs.existsSync(localRecordingPath)) {
-    try {
-      fs.unlinkSync(localRecordingPath);
-    } catch {
-      // ignore
-    }
+  // Send result with download link
+  if (downloadUrl) {
+    await ctx.editMessageText(
+      messages.recordingSaved({
+        meetingId: meetingIdStr,
+        duration: durationStr,
+        downloadUrl,
+      }),
+      { parse_mode: 'HTML' },
+    ).catch(() => {});
+  } else {
+    await ctx.editMessageText(
+      messages.recordingNoVideo(meetingIdStr, durationStr),
+      { parse_mode: 'HTML' },
+    ).catch(() => {});
   }
-
-  await ctx.editMessageText(
-    `✅ <b>Meeting Session Ended!</b>\n\n` +
-    `📌 <b>Meeting ID:</b> <code>${meetingIdStr}</code>\n` +
-    `⏱️ <b>Attended Duration:</b> <code>${durationStr}</code>\n` +
-    `🤖 <b>Status:</b> Completed & Cleaned Up\n\n` +
-    `The assistant has finished the meeting. You can send another Zoom link anytime to start a new session!`,
-    { parse_mode: 'HTML' },
-  ).catch(() => {});
 }
 
 function formatDuration(ms: number): string {

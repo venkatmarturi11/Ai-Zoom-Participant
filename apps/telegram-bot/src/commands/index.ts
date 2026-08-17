@@ -69,6 +69,24 @@ export function registerCommands(bot: Bot<BotContext>): void {
       return;
     }
 
+    // When user is in the "awaiting zoom login" state,
+    // and they send a Zoom link, treat it as a meeting link (they may have already logged in)
+    if (step === 'awaiting_zoom_login' || step === 'awaiting_zoom_link_after_login') {
+      if (ctx.message.text.includes('zoom.us') || extractZoomUrl(ctx.message.text)) {
+        ctx.session.step = 'idle';
+        await handleMeetingLinkInput(ctx);
+        return;
+      }
+      // If they send something that's not a Zoom link while awaiting login,
+      // remind them to login or send a link
+      await ctx.reply(
+        '👆 Please click the <b>Connect Zoom</b> button above to login, then send me a Zoom meeting link.\n\n' +
+        '<i>Or just paste a Zoom invite link directly!</i>',
+        { parse_mode: 'HTML' },
+      );
+      return;
+    }
+
     // Direct Zoom meeting link pasted anytime!
     if (ctx.message.text.includes('zoom.us') || extractZoomUrl(ctx.message.text)) {
       await handleMeetingLinkInput(ctx);
@@ -76,7 +94,7 @@ export function registerCommands(bot: Bot<BotContext>): void {
     }
 
     await ctx.reply(
-      '💡 Send <code>/help</code> to see available commands or paste any Zoom meeting link directly to join!',
+      '💡 Send <code>/help</code> to see available commands or paste any Zoom meeting link directly to start recording!',
       { parse_mode: 'HTML' },
     );
   });
@@ -127,18 +145,18 @@ export function registerCommands(bot: Bot<BotContext>): void {
 export async function setupBotCommands(bot: Bot<BotContext>): Promise<void> {
   try {
     await bot.api.setMyCommands([
-      { command: 'start', description: 'Start conversation & register' },
-      { command: 'join', description: 'Join a Zoom meeting immediately' },
-      { command: 'schedule', description: 'Schedule a meeting join time' },
-      { command: 'status', description: 'Current meeting session status' },
-      { command: 'stop', description: 'Stop active meeting session' },
-      { command: 'meetings', description: 'List active & recent meetings' },
+      { command: 'start', description: 'Start bot & connect Zoom' },
+      { command: 'join', description: 'Send a Zoom link to record' },
+      { command: 'stop', description: 'Stop recording & get download link' },
+      { command: 'status', description: 'Check active recording status' },
+      { command: 'meetings', description: 'List recent recordings' },
+      { command: 'connect_zoom', description: 'Connect Zoom account' },
       { command: 'account', description: 'View connected Zoom account' },
-      { command: 'connect_zoom', description: 'Connect Zoom OAuth account' },
       { command: 'disconnect_zoom', description: 'Disconnect Zoom account' },
-      { command: 'pause', description: 'Pause meeting notifications' },
-      { command: 'resume', description: 'Resume meeting notifications' },
-      { command: 'settings', description: 'Bot configuration & defaults' },
+      { command: 'schedule', description: 'Schedule a meeting join time' },
+      { command: 'pause', description: 'Pause notifications' },
+      { command: 'resume', description: 'Resume notifications' },
+      { command: 'settings', description: 'Bot settings' },
       { command: 'help', description: 'Get help & documentation' },
     ]);
     log.info('Registered Telegram bot commands menu');

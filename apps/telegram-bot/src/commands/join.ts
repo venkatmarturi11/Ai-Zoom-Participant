@@ -1,6 +1,5 @@
 import type { BotContext } from '../bot.js';
 import { messages } from '../formatters/messages.js';
-import { meetingActionsKeyboard } from '../keyboards/inline.js';
 import { parseMeetingUrl, extractZoomUrl } from '@zoom-assistant/meeting-parser';
 import { userRepo, meetingRepo } from '@zoom-assistant/database';
 import { meetingService } from '@zoom-assistant/orchestrator';
@@ -26,6 +25,12 @@ export async function joinCommand(ctx: BotContext): Promise<void> {
 
 /**
  * Handle text input when a meeting link is received.
+ *
+ * Flow:
+ * 1. Parse the Zoom URL
+ * 2. Send user login + join links so they can join on their device
+ * 3. Bot independently joins via headless browser and starts recording
+ * 4. User sends /stop → bot stops recording and sends download link
  */
 export async function handleMeetingLinkInput(ctx: BotContext): Promise<void> {
   const text = ctx.message?.text;
@@ -66,84 +71,9 @@ export async function handleMeetingLinkInput(ctx: BotContext): Promise<void> {
     return;
   }
 
-  // Store pending data and show confirmation
+  // Ready to join — execute the join flow
   ctx.session.step = 'idle';
-
-  // Delegate to MeetingService for meeting creation and BullMQ enqueueing
-  try {
-    const userDisplayName = [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(' ') || ctx.from?.username || undefined;
-
-    const initialStatusMsg = await ctx.reply(
-      `🚀 <b>Connecting to Zoom Meeting:</b> <code>${meeting.meetingId}</code>...\n\n` +
-      `⚡ Launching browser assistant & joining meeting room...\n` +
-      `👤 <b>Display Name:</b> <code>${userDisplayName ?? 'Meeting Assistant'}</code>\n\n` +
-      `<i>Please ensure the assistant is admitted if a waiting room is enabled.</i>`,
-      { parse_mode: 'HTML' },
-    );
-
-    let meetingRecordId = '';
-
-    const onStatusChange = async (status: 'CONNECTED' | 'FAILED' | 'WAITING_ROOM', detail?: string) => {
-      try {
-        if (status === 'CONNECTED') {
-          await ctx.api.editMessageText(
-            ctx.chat!.id,
-            initialStatusMsg.message_id,
-            `✅ <b>Assistant is now IN the Zoom Meeting!</b>\n\n` +
-            `📌 <b>Meeting ID:</b> <code>${meeting.meetingId}</code>\n` +
-            `👤 <b>Display Name:</b> <code>${userDisplayName ?? 'Meeting Assistant'}</code>\n` +
-            `🎥 <b>Screen Recording:</b> 🟢 <b>Active & Recording</b>\n\n` +
-            `The assistant is attending and capturing the meeting session.\n` +
-            `Send <code>/status</code> to check duration or <code>/stop</code> to finish and receive your video!`,
-            {
-              parse_mode: 'HTML',
-              reply_markup: meetingRecordId ? meetingActionsKeyboard(meetingRecordId) : undefined,
-            },
-          );
-        } else if (status === 'WAITING_ROOM') {
-          await ctx.api.editMessageText(
-            ctx.chat!.id,
-            initialStatusMsg.message_id,
-            `⏳ <b>Bot is in the Zoom Waiting Room</b>\n\n` +
-            `📌 <b>Meeting ID:</b> <code>${meeting.meetingId}</code>\n` +
-            `👤 <b>Display Name:</b> <code>${userDisplayName ?? 'Meeting Assistant'}</code>\n\n` +
-            `<i>Please ask the meeting host to admit <b>${userDisplayName ?? 'Meeting Assistant'}</b> to the meeting! The bot will automatically enter and start recording once admitted.</i>`,
-            { parse_mode: 'HTML' },
-          );
-        } else if (status === 'FAILED') {
-          await ctx.api.editMessageText(
-            ctx.chat!.id,
-            initialStatusMsg.message_id,
-            `❌ <b>Could not join Zoom meeting:</b>\n\n<code>${detail || 'Connection failed'}</code>\n\n` +
-            `<i>Please check that the meeting is currently live and the passcode is correct.</i>`,
-            { parse_mode: 'HTML' },
-          );
-        }
-      } catch (err: any) {
-        log.warn({ error: err?.message }, 'Failed to update join status message in Telegram');
-      }
-    };
-
-    const res = await meetingService.createAndQueueMeeting({
-      telegramUserId,
-      meetingUrl: meeting.originalUrl,
-      meetingId: meeting.meetingId,
-      passcode: meeting.passcode ?? undefined,
-      displayName: userDisplayName,
-      onStatusChange,
-    });
-
-    meetingRecordId = res.meeting.id;
-
-    log.info(
-      { meetingId: meeting.meetingId, userId: user?.id, recordId: res.meeting.id, capability: res.capability.capability },
-      'Meeting created and queued via MeetingService',
-    );
-  } catch (err: any) {
-    ctx.session.step = 'idle';
-    log.error({ error: err.message }, 'Error in /join handler');
-    await ctx.reply(`⚠️ ${err.message}`, { parse_mode: 'HTML' });
-  }
+  await executeJoinFlow(ctx, meeting.meetingId, meeting.originalUrl, meeting.passcode);
 }
 
 /**
@@ -171,71 +101,79 @@ export async function handlePasscodeInput(ctx: BotContext): Promise<void> {
   ctx.session.pendingMeetingId = undefined;
   ctx.session.pendingMeetingUrl = undefined;
 
-  try {
-    const userDisplayName = [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(' ') || ctx.from?.username || undefined;
+  await executeJoinFlow(ctx, meetingId, meetingUrl, text);
+}
 
+/**
+ * Core join logic — sends the user login/join links, then bot joins independently.
+ */
+async function executeJoinFlow(
+  ctx: BotContext,
+  meetingId: string,
+  meetingUrl: string,
+  passcode?: string,
+): Promise<void> {
+  const telegramUserId = BigInt(ctx.from!.id);
+  const userDisplayName =
+    ctx.session.pendingDisplayName ||
+    [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(' ') ||
+    ctx.from?.username ||
+    'Meeting Assistant';
+
+  try {
+    // Step 1: Send user the login page + join links
     const initialStatusMsg = await ctx.reply(
-      `🚀 <b>Connecting to Zoom Meeting:</b> <code>${meetingId}</code>...\n\n` +
-      `⚡ Launching browser assistant & joining meeting room...\n` +
-      `👤 <b>Display Name:</b> <code>${userDisplayName ?? 'Meeting Assistant'}</code>\n\n` +
-      `<i>Please ensure the assistant is admitted if a waiting room is enabled.</i>`,
-      { parse_mode: 'HTML' },
+      messages.botJoining(meetingId, userDisplayName),
+      { parse_mode: 'HTML', link_preview_options: { is_disabled: true } },
     );
 
-    let meetingRecordId = '';
-
+    // Step 2: Status callback — updates the user's message in real time
     const onStatusChange = async (status: 'CONNECTED' | 'FAILED' | 'WAITING_ROOM', detail?: string) => {
       try {
         if (status === 'CONNECTED') {
           await ctx.api.editMessageText(
             ctx.chat!.id,
             initialStatusMsg.message_id,
-            `✅ <b>Assistant is now IN the Zoom Meeting!</b>\n\n` +
-            `📌 <b>Meeting ID:</b> <code>${meetingId}</code>\n` +
-            `👤 <b>Display Name:</b> <code>${userDisplayName ?? 'Meeting Assistant'}</code>\n` +
-            `🎥 <b>Screen Recording:</b> 🟢 <b>Active & Recording</b>\n\n` +
-            `The assistant is attending and capturing the meeting session.\n` +
-            `Send <code>/status</code> to check duration or <code>/stop</code> to finish and receive your video!`,
-            {
-              parse_mode: 'HTML',
-              reply_markup: meetingRecordId ? meetingActionsKeyboard(meetingRecordId) : undefined,
-            },
+            messages.botConnected(meetingId, userDisplayName),
+            { parse_mode: 'HTML' },
           );
         } else if (status === 'WAITING_ROOM') {
           await ctx.api.editMessageText(
             ctx.chat!.id,
             initialStatusMsg.message_id,
-            `⏳ <b>Bot is in the Zoom Waiting Room</b>\n\n` +
-            `📌 <b>Meeting ID:</b> <code>${meetingId}</code>\n` +
-            `👤 <b>Display Name:</b> <code>${userDisplayName ?? 'Meeting Assistant'}</code>\n\n` +
-            `<i>Please ask the meeting host to admit <b>${userDisplayName ?? 'Meeting Assistant'}</b> to the meeting! The bot will automatically enter and start recording once admitted.</i>`,
+            messages.botWaitingRoom(meetingId, userDisplayName),
             { parse_mode: 'HTML' },
           );
         } else if (status === 'FAILED') {
           await ctx.api.editMessageText(
             ctx.chat!.id,
             initialStatusMsg.message_id,
-            `❌ <b>Could not join Zoom meeting:</b>\n\n<code>${detail || 'Connection failed'}</code>\n\n` +
-            `<i>Please check that the meeting is currently live and the passcode is correct.</i>`,
+            messages.botFailed(detail || 'Connection failed'),
             { parse_mode: 'HTML' },
           );
         }
       } catch (err: any) {
-        log.warn({ error: err?.message }, 'Failed to update passcode join status message in Telegram');
+        log.warn({ error: err?.message }, 'Failed to update join status message in Telegram');
       }
     };
 
+    // Step 3: Bot joins the meeting via headless browser
     const res = await meetingService.createAndQueueMeeting({
       telegramUserId,
       meetingUrl,
       meetingId,
-      passcode: text,
+      passcode: passcode ?? undefined,
       displayName: userDisplayName,
       onStatusChange,
     });
 
-    meetingRecordId = res.meeting.id;
+    log.info(
+      { meetingId, telegramUserId: String(telegramUserId), recordId: res.meeting.id, capability: res.capability.capability },
+      'Meeting created — bot joining & recording',
+    );
   } catch (err: any) {
+    ctx.session.step = 'idle';
+    log.error({ error: err.message }, 'Error in join flow');
     await ctx.reply(`⚠️ ${err.message}`, { parse_mode: 'HTML' });
   }
 }

@@ -75,7 +75,7 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
   public async captureScreenshot(): Promise<Buffer | undefined> {
     if (this.page) {
       try {
-        const buf = await this.page.screenshot({ type: 'jpeg', quality: 80 });
+        const buf = await this.page.screenshot({ type: 'jpeg', quality: 60 });
         if (buf && buf.length > 0) {
           this.latestScreenshot = buf as Buffer;
           return this.latestScreenshot;
@@ -99,6 +99,14 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
     log.info({ meetingId: this.meetingId }, 'Prepared Zoom Web Client parameters');
   }
 
+  /**
+   * Start screen recording using PuppeteerScreenRecorder.
+   * Optimized for ≤2 CPU cores:
+   * - 3 FPS (minimal CPU usage)
+   * - 640x360 resolution (360p — lightweight)
+   * - 200kbps bitrate
+   * - JPEG quality 30 for dashboard screenshots (every 30s)
+   */
   private startFrameRecorder(page: Page, meetingId: string): FrameRecorder {
     const recordingsDir = path.join(os.tmpdir(), 'zoom-recordings');
     if (!fs.existsSync(recordingsDir)) {
@@ -108,9 +116,9 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
     this.recordingFilePath = outFile;
 
     const recorder = new PuppeteerScreenRecorder(page as any, {
-      fps: 4, // Ultra-low FPS to save CPU
-      videoFrame: { width: 854, height: 480 }, // 480p resolution
-      videoBitrate: 300, // Reduced bitrate
+      fps: 3,                                   // Ultra-low FPS — saves CPU
+      videoFrame: { width: 640, height: 360 },  // 360p — lightweight for ≤2 cores
+      videoBitrate: 200,                         // Low bitrate to save CPU & disk
       videoCodec: 'libx264',
       videoFormat: 'mp4',
       aspectRatio: '16:9',
@@ -121,16 +129,16 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
       log.error({ error: err.message }, 'PuppeteerScreenRecorder failed to start');
     });
 
-    log.info({ outFile }, '🎥 Started PuppeteerScreenRecorder');
+    log.info({ outFile }, '🎥 Started PuppeteerScreenRecorder (3 FPS, 360p, 200kbps)');
 
     let frameCount = 0;
     let isStopped = false;
 
-    // Lightweight interval for updating the Telegram view (every 15 seconds to save huge CPU)
+    // Lightweight interval for updating screenshots (every 30 seconds to save CPU)
     let dashboardInterval: NodeJS.Timeout | null = setInterval(async () => {
       if (isStopped || !page) return;
       try {
-        const buf = await page.screenshot({ type: 'jpeg', quality: 30 }); // Lower JPEG quality
+        const buf = await page.screenshot({ type: 'jpeg', quality: 25 });
         if (buf && buf.length > 0) {
           this.latestScreenshot = buf as Buffer;
           frameCount++;
@@ -138,7 +146,7 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
       } catch {
         // ignore navigation errors
       }
-    }, 15000);
+    }, 30000); // Every 30s (was 15s, doubled to save CPU)
 
     const stop = async (): Promise<string | undefined> => {
       if (isStopped) return outFile;
@@ -153,7 +161,7 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
 
       if (fs.existsSync(outFile)) {
         const stats = fs.statSync(outFile);
-        log.info({ outFile, sizeBytes: stats.size }, '🎥 Screen recording MP4 saved successfully via PuppeteerScreenRecorder');
+        log.info({ outFile, sizeBytes: stats.size }, '🎥 Screen recording MP4 saved successfully');
         return outFile;
       }
       return undefined;
@@ -230,10 +238,29 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
           '--use-fake-ui-for-media-stream',
           '--use-fake-device-for-media-stream',
           '--autoplay-policy=no-user-gesture-required',
-          '--window-size=854,480',
+          // ── Resource optimization for ≤2 cores ──
+          '--window-size=640,360',
           '--use-gl=swiftshader',
+          '--disable-gpu',
+          '--disable-extensions',
+          '--disable-background-networking',
+          '--disable-background-timer-throttling',
+          '--disable-backgrounding-occluded-windows',
+          '--disable-component-update',
+          '--disable-default-apps',
+          '--disable-hang-monitor',
+          '--disable-popup-blocking',
+          '--disable-prompt-on-repost',
+          '--disable-sync',
+          '--disable-translate',
+          '--metrics-recording-only',
+          '--no-first-run',
+          '--single-process',               // Single process to save memory
+          '--js-flags=--max-old-space-size=256', // Limit JS heap to 256MB
+          // ── Audio capture support ──
+          '--enable-features=AudioServiceOutOfProcess',
         ],
-        defaultViewport: { width: 854, height: 480 },
+        defaultViewport: { width: 640, height: 360 },
       }) as unknown as Browser;
 
       this.page = await this.browser.newPage();
@@ -254,7 +281,7 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
       // Attempt to log in if credentials are provided
       await this.loginToZoom();
 
-      // Initialize direct screenshot-to-FFmpeg frame recorder
+      // Initialize screen recorder (optimized for ≤2 cores)
       this.frameRecorder = this.startFrameRecorder(this.page, this.meetingId);
 
       // Construct direct Zoom Web Client join URL

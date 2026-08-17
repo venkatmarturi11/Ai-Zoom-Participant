@@ -262,7 +262,11 @@ export class MeetingService {
           });
 
           recordingId = rec.id;
-          downloadUrl = baseUrl ? `${baseUrl}/api/recordings/${rec.id}/download` : `/api/recordings/${rec.id}/download`;
+          const adminKey = process.env['ADMIN_API_KEY'] || '';
+          const keyParam = adminKey ? `?key=${encodeURIComponent(adminKey)}` : '';
+          downloadUrl = baseUrl
+            ? `${baseUrl}/api/recordings/${rec.id}/download${keyParam}`
+            : `/api/recordings/${rec.id}/download${keyParam}`;
           log.info({ recordingId, sizeBytes: stats.size }, '💾 Stored video recording permanently in PostgreSQL database');
         }
       } catch (dbSaveErr: any) {

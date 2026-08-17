@@ -11,11 +11,18 @@ const log = createLogger({ module: 'bot' });
  */
 export interface SessionData {
   /** The current conversation state */
-  step: 'idle' | 'awaiting_meeting_link' | 'awaiting_passcode' | 'awaiting_schedule_time';
+  step:
+    | 'idle'
+    | 'awaiting_meeting_link'
+    | 'awaiting_passcode'
+    | 'awaiting_schedule_time'
+    | 'awaiting_zoom_login'
+    | 'awaiting_zoom_link_after_login';
   /** Temporary meeting data being assembled */
   pendingMeetingUrl?: string;
   pendingMeetingId?: string;
   pendingPasscode?: string;
+  pendingDisplayName?: string;
 }
 
 export type BotContext = Context & {
