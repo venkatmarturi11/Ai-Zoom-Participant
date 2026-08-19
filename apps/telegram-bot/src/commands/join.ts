@@ -5,6 +5,7 @@ import { parseMeetingUrl, extractZoomUrl } from '@zoom-assistant/meeting-parser'
 import { userRepo, meetingRepo } from '@zoom-assistant/database';
 import { meetingService } from '@zoom-assistant/orchestrator';
 import { createLogger } from '@zoom-assistant/shared';
+import { escapeHtml } from '../utils/html.js';
 
 const log = createLogger({ module: 'join-command' });
 
@@ -190,7 +191,7 @@ async function executeJoinFlow(
     );
   } catch (err: any) {
     ctx.session.step = 'idle';
-    log.error({ error: err.message }, 'Error in join flow');
-    await ctx.reply(`⚠️ ${err.message}`, { parse_mode: 'HTML' });
+    log.error({ error: err?.message }, 'Error in join flow');
+    await ctx.reply(`⚠️ ${escapeHtml(err?.message || 'Failed to start meeting session')}`, { parse_mode: 'HTML' });
   }
 }

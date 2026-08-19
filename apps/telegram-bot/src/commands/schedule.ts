@@ -3,6 +3,7 @@ import { messages } from '../formatters/messages.js';
 import { parseMeetingUrl, extractZoomUrl } from '@zoom-assistant/meeting-parser';
 import { meetingService } from '@zoom-assistant/orchestrator';
 import { createLogger } from '@zoom-assistant/shared';
+import { escapeHtml } from '../utils/html.js';
 
 const log = createLogger({ module: 'schedule-command' });
 
@@ -136,7 +137,7 @@ export async function handleScheduleTimeInput(ctx: BotContext): Promise<void> {
     );
   } catch (err: any) {
     log.error({ error: err?.message }, 'Failed to schedule meeting');
-    await ctx.reply(`❌ Failed to schedule meeting: ${err?.message || 'Unknown error'}`, { parse_mode: 'HTML' });
+    await ctx.reply(`❌ Failed to schedule meeting: ${escapeHtml(err?.message || 'Unknown error')}`, { parse_mode: 'HTML' });
   }
 }
 

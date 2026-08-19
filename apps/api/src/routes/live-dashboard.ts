@@ -36,10 +36,14 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
   /**
    * WS /api/live/control — WebSocket endpoint for Human-in-the-Loop browser control
    */
-  fastify.get('/api/live/control', { websocket: true }, (connection) => {
-    connection.socket.on('message', async (message: Buffer) => {
+  fastify.get('/api/live/control', { websocket: true }, (connection: any) => {
+    const ws = connection?.socket || connection;
+    if (!ws || typeof ws.on !== 'function') return;
+
+    ws.on('message', async (message: any) => {
       try {
-        const event = JSON.parse(message.toString());
+        const str = typeof message === 'string' ? message : message.toString();
+        const event = JSON.parse(str);
         await meetingService.dispatchControlEvent(event);
       } catch {
         // ignore invalid messages
