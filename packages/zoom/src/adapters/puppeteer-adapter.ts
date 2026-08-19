@@ -446,89 +446,120 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
       const fillAndJoinMeeting = async (): Promise<boolean> => {
         if (!this.page) return false;
 
+        const parts = this.displayName.trim().split(/\s+/);
+        const firstName = parts[0] || 'Assistant';
+        const lastName = parts.slice(1).join(' ') || 'Bot';
+        const cleanFirst = firstName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'assistant';
+        const cleanLast = lastName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'bot';
+        const botEmail =
+          process.env['ZOOM_BOT_EMAIL'] ||
+          `${cleanFirst}.${cleanLast}${Math.floor(Math.random() * 900 + 100)}@gmail.com`;
+
         // Native Puppeteer typing for React 18 inputs
         try {
-          // Standard Join Name input
-          const nameInputHandle = await this.page.$(
+          // 1. Standard Join Name input
+          const nameInputHandles = await this.page.$$(
             '#input-for-name, input[name="display_name"], #inputname, input[name="inputname"], input[placeholder*="Name" i]',
           );
-          if (nameInputHandle) {
-            const currentVal = await this.page.evaluate((el: any) => el.value, nameInputHandle);
-            if (!currentVal || currentVal !== this.displayName) {
-              await nameInputHandle.click({ clickCount: 3 }).catch(() => {});
-              await nameInputHandle.type(this.displayName, { delay: 25 }).catch(() => {});
-            }
+          for (const h of nameInputHandles) {
+            try {
+              const currentVal = await this.page.evaluate((el: any) => el.value, h);
+              if (!currentVal || currentVal !== this.displayName) {
+                await h.click({ clickCount: 3 });
+                await h.type(this.displayName, { delay: 20 });
+              }
+            } catch {}
           }
 
-          // Registration Page: First Name, Last Name, Email
-          const parts = this.displayName.trim().split(/\s+/);
-          const firstName = parts[0] || 'Assistant';
-          const lastName = parts.slice(1).join(' ') || 'Bot';
-          const botEmail = process.env['ZOOM_BOT_EMAIL'] || `${firstName.toLowerCase()}.${lastName.toLowerCase()}${Math.floor(Math.random() * 900 + 100)}@gmail.com`;
-
-          const firstNameHandle = await this.page.$(
-            '#first_name, #firstName, input[name="first_name"], input[placeholder*="First Name" i], input[aria-label*="First Name" i]',
+          // 2. First Name (Registration page)
+          const firstNameHandles = await this.page.$$(
+            '#first_name, #firstName, input[name="first_name"], input[name="firstName"], input[placeholder*="First Name" i], input[aria-label*="First Name" i]',
           );
-          if (firstNameHandle) {
-            const val = await this.page.evaluate((el: any) => el.value, firstNameHandle);
-            if (!val) {
-              await firstNameHandle.click({ clickCount: 3 }).catch(() => {});
-              await firstNameHandle.type(firstName, { delay: 25 }).catch(() => {});
-            }
+          for (const h of firstNameHandles) {
+            try {
+              const val = await this.page.evaluate((el: any) => el.value, h);
+              if (!val) {
+                await h.click({ clickCount: 3 });
+                await h.type(firstName, { delay: 20 });
+              }
+            } catch {}
           }
 
-          const lastNameHandle = await this.page.$(
-            '#last_name, #lastName, input[name="last_name"], input[placeholder*="Last Name" i], input[aria-label*="Last Name" i]',
+          // 3. Last Name (Registration page)
+          const lastNameHandles = await this.page.$$(
+            '#last_name, #lastName, input[name="last_name"], input[name="lastName"], input[placeholder*="Last Name" i], input[aria-label*="Last Name" i]',
           );
-          if (lastNameHandle) {
-            const val = await this.page.evaluate((el: any) => el.value, lastNameHandle);
-            if (!val) {
-              await lastNameHandle.click({ clickCount: 3 }).catch(() => {});
-              await lastNameHandle.type(lastName, { delay: 25 }).catch(() => {});
-            }
+          for (const h of lastNameHandles) {
+            try {
+              const val = await this.page.evaluate((el: any) => el.value, h);
+              if (!val) {
+                await h.click({ clickCount: 3 });
+                await h.type(lastName, { delay: 20 });
+              }
+            } catch {}
           }
 
-          const emailHandle = await this.page.$(
-            '#email, input[name="email"], input[type="email"], input[placeholder*="Email" i], input[aria-label*="Email" i]',
+          // 4. Email Address (Registration page)
+          const emailHandles = await this.page.$$(
+            '#email, #email_address, input[type="email"], input[name="email"], input[name="email_address"], input[placeholder*="Email" i], input[aria-label*="Email" i], input[id*="email" i], input[name*="email" i]',
           );
-          if (emailHandle) {
-            const val = await this.page.evaluate((el: any) => el.value, emailHandle);
-            if (!val) {
-              await emailHandle.click({ clickCount: 3 }).catch(() => {});
-              await emailHandle.type(botEmail, { delay: 25 }).catch(() => {});
-            }
+          for (const h of emailHandles) {
+            try {
+              const val = await this.page.evaluate((el: any) => el.value, h);
+              if (!val || val !== botEmail) {
+                await h.click({ clickCount: 3 });
+                await h.type(botEmail, { delay: 20 });
+              }
+            } catch {}
           }
 
-          const confirmEmailHandle = await this.page.$(
-            '#confirm_email, input[name="confirm_email"], input[placeholder*="Confirm Email" i]',
+          // 5. Confirm Email Address (Registration page)
+          const confirmEmailHandles = await this.page.$$(
+            '#confirm_email, #confirmEmail, input[name="confirm_email"], input[name="confirmEmail"], input[placeholder*="Confirm Email" i], input[aria-label*="Confirm Email" i]',
           );
-          if (confirmEmailHandle) {
-            const val = await this.page.evaluate((el: any) => el.value, confirmEmailHandle);
-            if (!val) {
-              await confirmEmailHandle.click({ clickCount: 3 }).catch(() => {});
-              await confirmEmailHandle.type(botEmail, { delay: 25 }).catch(() => {});
-            }
+          for (const h of confirmEmailHandles) {
+            try {
+              const val = await this.page.evaluate((el: any) => el.value, h);
+              if (!val || val !== botEmail) {
+                await h.click({ clickCount: 3 });
+                await h.type(botEmail, { delay: 20 });
+              }
+            } catch {}
           }
-        } catch {}
 
-        try {
+          // 6. Passcode (if present)
           if (this.passcode) {
-            const pwdInputHandle = await this.page.$(
+            const pwdInputHandles = await this.page.$$(
               '#input-for-pwd, #inputpasscode, input[name="inputpasscode"], input[type="password"]',
             );
-            if (pwdInputHandle) {
-              const currentPwd = await this.page.evaluate((el: any) => el.value, pwdInputHandle);
-              if (!currentPwd) {
-                await pwdInputHandle.click({ clickCount: 3 }).catch(() => {});
-                await pwdInputHandle.type(this.passcode, { delay: 25 }).catch(() => {});
-              }
+            for (const h of pwdInputHandles) {
+              try {
+                const currentPwd = await this.page.evaluate((el: any) => el.value, h);
+                if (!currentPwd) {
+                  await h.click({ clickCount: 3 });
+                  await h.type(this.passcode, { delay: 20 });
+                }
+              } catch {}
             }
           }
         } catch {}
 
         return this.page
           .evaluate(
-            (name: string, pwd?: string) => {
+            (formData: { name: string; firstName: string; lastName: string; email: string; pwd?: string }) => {
+              function setReactInputValue(input: HTMLInputElement | null, val?: string) {
+                if (!input || !val) return;
+                const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+                if (valueSetter) {
+                  valueSetter.call(input, val);
+                } else {
+                  input.value = val;
+                }
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+                input.dispatchEvent(new Event('blur', { bubbles: true }));
+              }
+
               // 1. Auto-dismiss cookie consent and permission modals
               const dismissables = Array.from(document.querySelectorAll('button, a, div[role="button"], span')).filter(
                 (el) => {
@@ -552,12 +583,73 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
               dismissables.forEach((el) => {
                 try {
                   (el as HTMLElement).click();
-                } catch {
-                  // ignore
+                } catch {}
+              });
+
+              // 2. Set First Name inputs
+              const firstInputs = Array.from(
+                document.querySelectorAll(
+                  '#first_name, #firstName, input[name="first_name"], input[name="firstName"], input[placeholder*="First Name" i], input[aria-label*="First Name" i]',
+                ),
+              ) as HTMLInputElement[];
+              firstInputs.forEach((i) => setReactInputValue(i, formData.firstName));
+
+              // 3. Set Last Name inputs
+              const lastInputs = Array.from(
+                document.querySelectorAll(
+                  '#last_name, #lastName, input[name="last_name"], input[name="lastName"], input[placeholder*="Last Name" i], input[aria-label*="Last Name" i]',
+                ),
+              ) as HTMLInputElement[];
+              lastInputs.forEach((i) => setReactInputValue(i, formData.lastName));
+
+              // 4. Set Email inputs
+              const emailInputs = Array.from(
+                document.querySelectorAll(
+                  '#email, #email_address, input[type="email"], input[name="email"], input[name="email_address"], input[placeholder*="Email" i], input[aria-label*="Email" i], input[id*="email" i], input[name*="email" i]',
+                ),
+              ) as HTMLInputElement[];
+              emailInputs.forEach((i) => setReactInputValue(i, formData.email));
+
+              // 5. Set Confirm Email inputs
+              const confirmEmailInputs = Array.from(
+                document.querySelectorAll(
+                  '#confirm_email, #confirmEmail, input[name="confirm_email"], input[name="confirmEmail"], input[placeholder*="Confirm Email" i], input[aria-label*="Confirm Email" i]',
+                ),
+              ) as HTMLInputElement[];
+              confirmEmailInputs.forEach((i) => setReactInputValue(i, formData.email));
+
+              // 6. Set Join Name inputs
+              const nameInputs = Array.from(
+                document.querySelectorAll(
+                  '#input-for-name, input[name="display_name"], #inputname, input[name="inputname"], input[placeholder*="Name" i]',
+                ),
+              ) as HTMLInputElement[];
+              nameInputs.forEach((i) => setReactInputValue(i, formData.name));
+
+              // 7. Set Passcode inputs if provided
+              if (formData.pwd) {
+                const pwdInputs = Array.from(
+                  document.querySelectorAll(
+                    '#input-for-pwd, #inputpasscode, input[name="inputpasscode"], input[type="password"]',
+                  ),
+                ) as HTMLInputElement[];
+                pwdInputs.forEach((i) => setReactInputValue(i, formData.pwd));
+              }
+
+              // 8. Auto-check any required checkboxes (terms / consent)
+              const checkboxes = Array.from(document.querySelectorAll('input[type="checkbox"]')) as HTMLInputElement[];
+              checkboxes.forEach((cb) => {
+                if (!cb.checked) {
+                  cb.checked = true;
+                  cb.dispatchEvent(new Event('input', { bubbles: true }));
+                  cb.dispatchEvent(new Event('change', { bubbles: true }));
+                  try {
+                    cb.click();
+                  } catch {}
                 }
               });
 
-              // 2. Click "Register and Join" or Registration Submit button if on registration page
+              // 9. Click "Register and Join" or Registration Submit button if on registration page
               const registerBtns = Array.from(
                 document.querySelectorAll('button, input[type="submit"], .zm-btn, a'),
               ).filter((el) => {
@@ -566,6 +658,7 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
                   txt.includes('register and join') ||
                   txt === 'register' ||
                   txt === 'register and join meeting' ||
+                  txt === 'submit' ||
                   el.id === 'btnSubmit'
                 );
               });
@@ -573,7 +666,7 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
                 (registerBtns[0] as HTMLElement).click();
               }
 
-              // 3. Click post-registration "Click here to join" or "Join from your browser" link
+              // 10. Click post-registration "Click here to join" or "Join from your browser" link
               const postRegLinks = Array.from(document.querySelectorAll('a, button')).filter((el) => {
                 const txt = ((el as HTMLElement).innerText || '').trim().toLowerCase();
                 const href = (el as HTMLAnchorElement).href || '';
@@ -589,62 +682,7 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
                 (postRegLinks[0] as HTMLElement).click();
               }
 
-              // 4. Set Name input using React property setter descriptor
-              const nameInput =
-                (document.querySelector('#input-for-name') as HTMLInputElement) ||
-                (document.querySelector('input[name="display_name"]') as HTMLInputElement) ||
-                (document.querySelector('#inputname') as HTMLInputElement) ||
-                (document.querySelector('input[name="inputname"]') as HTMLInputElement) ||
-                (document.querySelector('input[placeholder*="Name" i]') as HTMLInputElement);
-
-              if (nameInput && (!nameInput.value || nameInput.value !== name)) {
-                const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
-                if (valueSetter) {
-                  valueSetter.call(nameInput, name);
-                } else {
-                  nameInput.value = name;
-                }
-                nameInput.dispatchEvent(new Event('input', { bubbles: true }));
-                nameInput.dispatchEvent(new Event('change', { bubbles: true }));
-                nameInput.dispatchEvent(
-                  new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }),
-                );
-                nameInput.dispatchEvent(
-                  new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }),
-                );
-              }
-
-              // 5. Set Passcode input if provided
-              if (pwd) {
-                const pwdInput =
-                  (document.querySelector('#input-for-pwd') as HTMLInputElement) ||
-                  (document.querySelector('#inputpasscode') as HTMLInputElement) ||
-                  (document.querySelector('input[name="inputpasscode"]') as HTMLInputElement) ||
-                  (document.querySelector('input[type="password"]') as HTMLInputElement);
-
-                if (pwdInput && !pwdInput.value) {
-                  const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
-                  if (valueSetter) {
-                    valueSetter.call(pwdInput, pwd);
-                  } else {
-                    pwdInput.value = pwd;
-                  }
-                  pwdInput.dispatchEvent(new Event('input', { bubbles: true }));
-                  pwdInput.dispatchEvent(new Event('change', { bubbles: true }));
-                }
-              }
-
-              // 6. Request submit on form if present
-              const form = (nameInput ? nameInput.closest('form') : null) || document.querySelector('form');
-              if (form) {
-                try {
-                  form.requestSubmit();
-                } catch {
-                  form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-                }
-              }
-
-              // 7. Click Join button
+              // 11. Click Join button if on preview page
               const buttons = Array.from(document.querySelectorAll('button, .zm-btn, input[type="submit"], a'));
               let clicked = false;
               for (const b of buttons) {
@@ -664,7 +702,7 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
                 }
               }
 
-              // 8. Join Computer Audio if dialog appeared
+              // 12. Join Computer Audio if dialog appeared
               const audioBtns = Array.from(document.querySelectorAll('button')).filter((b) => {
                 const txt = (b.innerText || '').toLowerCase();
                 return (
@@ -676,15 +714,18 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
               audioBtns.forEach((b) => {
                 try {
                   b.click();
-                } catch {
-                  // ignore
-                }
+                } catch {}
               });
 
               return clicked;
             },
-            this.displayName,
-            this.passcode,
+            {
+              name: this.displayName,
+              firstName,
+              lastName,
+              email: botEmail,
+              pwd: this.passcode,
+            },
           )
           .catch(() => false);
       };
