@@ -4,8 +4,33 @@ import { InlineKeyboard } from 'grammy';
 // Reusable inline keyboard builders
 // ============================================================
 
+export function isValidTelegramButtonUrl(url?: string): boolean {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false;
+    const hostname = parsed.hostname.toLowerCase();
+    if (
+      hostname === 'localhost' ||
+      hostname === '127.0.0.1' ||
+      hostname === '::1' ||
+      hostname.endsWith('.local') ||
+      hostname.endsWith('.internal')
+    ) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function connectZoomKeyboard(oauthUrl: string) {
-  return new InlineKeyboard().url('🔐 Connect Zoom', oauthUrl);
+  const kb = new InlineKeyboard();
+  if (isValidTelegramButtonUrl(oauthUrl)) {
+    kb.url('🔐 Connect Zoom', oauthUrl);
+  }
+  return kb;
 }
 
 export function meetingActionsKeyboard(meetingId: string) {
@@ -46,11 +71,16 @@ export function waitingRoomKeyboard(meetingId: string) {
     .text('🛑 Stop', `stop:${meetingId}`);
 }
 
-export function liveControlKeyboard(liveMonitorUrl: string, meetingId?: string) {
-  const kb = new InlineKeyboard().url('🖥️ Open Live Screen & Control (Captcha/Login/Join)', liveMonitorUrl);
-  if (meetingId) {
-    kb.row().text('🛑 Stop Recording', `stop_confirm:${meetingId}`);
+export function liveControlKeyboard(liveMonitorUrl?: string, meetingId?: string) {
+  const kb = new InlineKeyboard();
+  if (liveMonitorUrl && isValidTelegramButtonUrl(liveMonitorUrl)) {
+    kb.url('🖥️ Open Live Screen & Control (Captcha/Login/Join)', liveMonitorUrl);
+    if (meetingId) {
+      kb.row().text('🛑 Stop Recording', `stop_confirm:${meetingId}`);
+    }
+  } else if (meetingId) {
+    kb.text('🛑 Stop Recording', `stop_confirm:${meetingId}`);
   }
-  return kb;
+  return kb.inline_keyboard.length > 0 ? kb : undefined;
 }
 

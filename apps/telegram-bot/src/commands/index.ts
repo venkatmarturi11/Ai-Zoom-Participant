@@ -123,6 +123,10 @@ export function registerCommands(bot: Bot<BotContext>): void {
   bot.on('callback_query:data', async (ctx, next) => {
     const data = ctx.callbackQuery.data;
 
+    // Acknowledge immediately so Telegram clears the button's loading spinner
+    // right away, no matter which branch below (if any) ends up handling it.
+    await ctx.answerCallbackQuery().catch(() => {});
+
     if (data === 'disconnect_confirm') {
       await handleDisconnectConfirm(ctx);
       return;

@@ -16,6 +16,37 @@ const log = createLogger({ module: 'meeting-service' });
 
 const activeBrowserAdapters = new Map<string, PuppeteerZoomAdapter>();
 
+/**
+ * The dedicated "Sign in to Zoom" browser launched from /login → Launch Zoom
+ * Sign-In. Kept OUT of activeBrowserAdapters so it can never be picked as the
+ * "first" adapter and hijack the Live Screen / remote control away from a
+ * real meeting that starts later.
+ */
+let loginAdapter: PuppeteerZoomAdapter | undefined;
+let loginAdapterExpiry: NodeJS.Timeout | undefined;
+const LOGIN_SESSION_MAX_MS = 10 * 60 * 1000; // safety net so an abandoned login tab doesn't leak a Chromium process forever
+
+async function stopLoginAdapter(): Promise<void> {
+  if (loginAdapterExpiry) {
+    clearTimeout(loginAdapterExpiry);
+    loginAdapterExpiry = undefined;
+  }
+  if (loginAdapter) {
+    const toStop = loginAdapter;
+    loginAdapter = undefined;
+    await toStop.stop().catch(() => {});
+  }
+}
+
+/**
+ * The adapter that should back the Live Screen / remote control right now:
+ * a real meeting always takes priority over the manual login browser.
+ */
+function getPrimaryAdapter(): PuppeteerZoomAdapter | undefined {
+  const meetingAdapter = activeBrowserAdapters.values().next().value as PuppeteerZoomAdapter | undefined;
+  return meetingAdapter ?? loginAdapter;
+}
+
 export interface CreateMeetingParams {
   telegramUserId: bigint;
   meetingUrl: string;
@@ -79,6 +110,10 @@ export class MeetingService {
     });
 
     const jobId = `inprocess-${meeting.id}`;
+
+    // A real meeting is starting — free up the manual login browser (if any)
+    // so it can't keep hogging the Live Screen / remote control or Chromium resources.
+    await stopLoginAdapter();
 
     // Launch headless Puppeteer browser agent to enter Zoom meeting room
     try {
@@ -364,7 +399,7 @@ export class MeetingService {
     if (meetingId) {
       adapter = activeBrowserAdapters.get(meetingId);
     } else {
-      adapter = activeBrowserAdapters.values().next().value;
+      adapter = getPrimaryAdapter();
     }
     if (!adapter) return undefined;
     return adapter.captureScreenshot();
@@ -383,11 +418,14 @@ export class MeetingService {
     hasScreenshot: boolean;
     activeCount: number;
   }> {
-    const entries = Array.from(activeBrowserAdapters.entries());
-    if (entries.length === 0) {
+    const meetingEntries = Array.from(activeBrowserAdapters.entries());
+    const meetingId = meetingEntries[0]?.[0] ?? (loginAdapter ? 'manual-login' : undefined);
+    const adapter = meetingEntries[0]?.[1] ?? loginAdapter;
+
+    if (!adapter) {
       return { active: false, hasScreenshot: false, activeCount: 0 };
     }
-    const [meetingId, adapter] = entries[0]!;
+
     const status = await adapter.getStatus();
     const screenshot = adapter.getLatestScreenshot();
     return {
@@ -398,7 +436,7 @@ export class MeetingService {
       status: status.waitingRoom ? 'WAITING_ROOM' : status.connected ? 'CONNECTED' : status.meetingEnded ? 'ENDED' : 'CONNECTING',
       frameCount: adapter.getFrameCount(),
       hasScreenshot: Boolean(screenshot && screenshot.length > 0),
-      activeCount: entries.length,
+      activeCount: meetingEntries.length + (loginAdapter ? 1 : 0),
     };
   }
 
@@ -406,25 +444,31 @@ export class MeetingService {
    * Dispatch a remote control event (mouse/keyboard) to the active browser adapter.
    */
   public async dispatchControlEvent(event: any): Promise<void> {
-    const entries = Array.from(activeBrowserAdapters.values());
-    if (entries.length > 0) {
-      const adapter = entries[0];
-      if (adapter && typeof adapter.handleControlEvent === 'function') {
-        await adapter.handleControlEvent(event);
-      }
+    const adapter = getPrimaryAdapter();
+    if (adapter && typeof adapter.handleControlEvent === 'function') {
+      await adapter.handleControlEvent(event);
     }
   }
 
   /**
    * Launch an interactive browser session to Zoom Sign-in page for manual permanent login.
+   * No-ops if a real meeting is already active (the meeting owns the Live Screen)
+   * or a login session is already running.
    */
   public async launchLoginSession(): Promise<void> {
-    if (activeBrowserAdapters.size > 0) return;
-    const adapter = new PuppeteerZoomAdapter('web-user', 'https://zoom.us/signin', undefined, 'User Login');
-    activeBrowserAdapters.set('manual-login', adapter);
+    if (activeBrowserAdapters.size > 0 || loginAdapter) return;
+
+    const adapter = new PuppeteerZoomAdapter('web-user', 'https://zoom.us/signin', undefined, 'User Login', true);
+    loginAdapter = adapter;
+    loginAdapterExpiry = setTimeout(() => {
+      stopLoginAdapter().catch(() => {});
+    }, LOGIN_SESSION_MAX_MS);
+
     adapter.connect().catch((err: any) => {
       log.warn({ error: err?.message }, 'Login browser session finished');
-      activeBrowserAdapters.delete('manual-login');
+      if (loginAdapter === adapter) {
+        stopLoginAdapter().catch(() => {});
+      }
     });
   }
 }

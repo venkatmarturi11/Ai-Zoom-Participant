@@ -1,5 +1,6 @@
 import type { BotContext } from '../bot.js';
 import { InlineKeyboard } from 'grammy';
+import { isValidTelegramButtonUrl } from '../keyboards/inline.js';
 
 export async function loginCommand(ctx: BotContext): Promise<void> {
   const hostUrl =
@@ -7,7 +8,8 @@ export async function loginCommand(ctx: BotContext): Promise<void> {
     process.env['RENDER_EXTERNAL_URL'] ||
     'http://localhost:3000';
 
-  const liveMonitorUrl = `${hostUrl}/`;
+  const adminKey = process.env['ADMIN_API_KEY']?.trim();
+  const liveMonitorUrl = adminKey ? `${hostUrl}/?key=${encodeURIComponent(adminKey)}` : `${hostUrl}/`;
   const zoomLoginUrl = 'https://zoom.us/signin';
 
   const text = [
@@ -23,10 +25,11 @@ export async function loginCommand(ctx: BotContext): Promise<void> {
     '✨ *Benefit:* Zoom will *never* ask you to fill registration forms or verify again\\!',
   ].join('\n');
 
-  const keyboard = new InlineKeyboard()
-    .url('🖥️ Open Live Screen to Login', liveMonitorUrl)
-    .row()
-    .url('🔗 Zoom Sign-In Page', zoomLoginUrl);
+  const keyboard = new InlineKeyboard();
+  if (isValidTelegramButtonUrl(liveMonitorUrl)) {
+    keyboard.url('🖥️ Open Live Screen to Login', liveMonitorUrl).row();
+  }
+  keyboard.url('🔗 Zoom Sign-In Page', zoomLoginUrl);
 
   await ctx.reply(text, {
     parse_mode: 'MarkdownV2',

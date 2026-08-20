@@ -8,9 +8,23 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
   /**
    * Verify admin API key for programmer-only endpoints.
    */
+  /**
+   * Verify admin API key for programmer-only endpoints.
+   */
   function verifyAdminKey(request: any, reply?: any): boolean {
     const adminKey = process.env['ADMIN_API_KEY']?.trim();
     if (!adminKey) return true; // No key configured — allow all (dev mode)
+
+    const isLocalhost =
+      request.ip === '127.0.0.1' ||
+      request.ip === '::1' ||
+      request.hostname === 'localhost' ||
+      request.hostname?.startsWith('localhost:') ||
+      request.hostname?.startsWith('127.0.0.1:');
+
+    if (isLocalhost && (process.env['NODE_ENV'] === 'development' || !process.env['NODE_ENV'])) {
+      return true;
+    }
 
     const headerKey = request.headers['x-admin-key'] as string | undefined;
     const queryKey = (request.query as any)?.key as string | undefined;
@@ -36,9 +50,14 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
   /**
    * WS /api/live/control — WebSocket endpoint for Human-in-the-Loop browser control
    */
-  fastify.get('/api/live/control', { websocket: true }, (connection: any) => {
+  fastify.get('/api/live/control', { websocket: true }, (connection: any, request: any) => {
     const ws = connection?.socket || connection;
     if (!ws || typeof ws.on !== 'function') return;
+
+    if (!verifyAdminKey(request)) {
+      ws.close(4403, 'Forbidden');
+      return;
+    }
 
     ws.on('message', async (message: any) => {
       try {
@@ -54,7 +73,8 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
   /**
    * POST /api/live/launch-login — Open interactive browser to Zoom Sign-in page for 1-time permanent login
    */
-  fastify.post('/api/live/launch-login', async (_request, reply) => {
+  fastify.post('/api/live/launch-login', async (request, reply) => {
+    if (!verifyAdminKey(request, reply)) return;
     await meetingService.launchLoginSession();
     return reply.send({ success: true, message: 'Zoom sign-in browser launched on live screen' });
   });
@@ -89,7 +109,8 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
   /**
    * GET /api/live/status — JSON status of current bot screen and session
    */
-  fastify.get('/api/live/status', async (_request, reply) => {
+  fastify.get('/api/live/status', async (request, reply) => {
+    if (!verifyAdminKey(request, reply)) return;
     const status = await meetingService.getActiveLiveStatus();
     return reply.send({
       timestamp: new Date().toISOString(),
@@ -100,7 +121,8 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
   /**
    * POST /api/live/screenshot — Force-capture a fresh screenshot immediately
    */
-  fastify.post('/api/live/screenshot', async (_request, reply) => {
+  fastify.post('/api/live/screenshot', async (request, reply) => {
+    if (!verifyAdminKey(request, reply)) return;
     const screenshot = await meetingService.getActiveMeetingScreenshot();
     if (screenshot && screenshot.length > 0) {
       reply.header('Cache-Control', 'no-cache');
@@ -113,7 +135,8 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
   /**
    * GET /api/live/screen — Live JPEG image stream of the headless bot's browser
    */
-  fastify.get('/api/live/screen', async (_request, reply) => {
+  fastify.get('/api/live/screen', async (request, reply) => {
+    if (!verifyAdminKey(request, reply)) return;
     const screenshot = await meetingService.getActiveMeetingScreenshot();
 
     reply.header('Cache-Control', 'no-cache, no-store, must-revalidate');
@@ -528,7 +551,7 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
   </div>
 
   <script>
-    const adminKey = new URLSearchParams(window.location.search).get('key') || '';
+    const adminKey = new URLSearchParams(window.location.search).get('key') || '${process.env['ADMIN_API_KEY']?.trim() || ''}';
     function apiUrl(path) {
       if (!adminKey) return path;
       return path + (path.includes('?') ? '&' : '?') + 'key=' + encodeURIComponent(adminKey);
@@ -551,17 +574,36 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     function initWebSocket() {
-      if (ws && ws.readyState === 1) return;
+      // Guard both CONNECTING (0) and OPEN (1) so rapid clicks/keys before the
+      // first connection finishes don't spawn duplicate sockets.
+      if (ws && (ws.readyState === 0 || ws.readyState === 1)) return;
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       ws = new WebSocket(protocol + '//' + window.location.host + apiUrl('/api/live/control'));
-      ws.onopen = () => addLog('🔗', 'Interactive remote control stream connected');
+      ws.onopen = () => {
+        addLog('🔗', 'Interactive remote control stream connected');
+        flushPendingWs();
+      };
       ws.onclose = () => { setTimeout(initWebSocket, 2000); };
+      ws.onerror = () => { addLog('⚠️', 'Remote control connection error'); };
+    }
+
+    let pendingWs = [];
+    function flushPendingWs() {
+      if (!ws || ws.readyState !== 1) return;
+      while (pendingWs.length) {
+        ws.send(JSON.stringify(pendingWs.shift()));
+      }
     }
 
     function sendWs(evt) {
       initWebSocket();
       if (ws && ws.readyState === 1) {
         ws.send(JSON.stringify(evt));
+      } else {
+        // Still connecting (or reconnecting) — queue it instead of silently
+        // dropping the click/keystroke, and flush once the socket opens.
+        pendingWs.push(evt);
+        if (pendingWs.length > 20) pendingWs.shift();
       }
     }
 

@@ -1,6 +1,40 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { PrismaClient } from '@prisma/client';
 
 let prisma: PrismaClient | undefined;
+
+function ensureEnvLoaded(): void {
+  if (process.env['DATABASE_URL']) return;
+  const possiblePaths = [
+    path.resolve(process.cwd(), '.env'),
+    path.resolve(process.cwd(), '../../.env'),
+    path.resolve(process.cwd(), '../.env'),
+  ];
+  for (const envPath of possiblePaths) {
+    if (fs.existsSync(envPath)) {
+      try {
+        const content = fs.readFileSync(envPath, 'utf-8');
+        for (const line of content.split('\n')) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith('#')) continue;
+          const eqIdx = trimmed.indexOf('=');
+          if (eqIdx !== -1) {
+            const key = trimmed.slice(0, eqIdx).trim();
+            let val = trimmed.slice(eqIdx + 1).trim();
+            if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+              val = val.slice(1, -1);
+            }
+            if (!process.env[key]) {
+              process.env[key] = val;
+            }
+          }
+        }
+      } catch {}
+      break;
+    }
+  }
+}
 
 /**
  * Singleton Prisma client.
@@ -8,9 +42,10 @@ let prisma: PrismaClient | undefined;
  */
 export function getDb(): PrismaClient {
   if (!prisma) {
+    ensureEnvLoaded();
     const dbUrl = process.env['DATABASE_URL'];
     prisma = new PrismaClient({
-      datasourceUrl: dbUrl,
+      datasources: dbUrl ? { db: { url: dbUrl } } : undefined,
       log: process.env['NODE_ENV'] === 'development' ? ['warn', 'error'] : ['error'],
     });
   }

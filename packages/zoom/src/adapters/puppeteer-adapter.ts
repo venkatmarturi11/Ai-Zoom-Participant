@@ -89,6 +89,13 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
     private readonly meetingId: string,
     private readonly passcode?: string,
     private readonly displayName: string = 'Meeting Assistant',
+    /**
+     * True for the dedicated manual "Sign in to Zoom" browser (launched via
+     * /login → Launch Zoom Sign-In). Login-only sessions must never run the
+     * meeting-join loop (which can spin for up to 10 minutes) — they just
+     * need to load the sign-in page and stay open for human interaction.
+     */
+    private readonly isLoginOnly: boolean = false,
   ) {}
 
   public getMeetingId(): string {
@@ -416,8 +423,12 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
         await context.overridePermissions(origin, ['microphone', 'camera']).catch(() => {});
       }
 
-      // Initialize screen recorder (optimized for ≤2 cores)
-      this.frameRecorder = this.startFrameRecorder(this.page, this.meetingId);
+      // Initialize screen recorder (optimized for ≤2 cores). Skipped for the
+      // manual login-only session — there's nothing to record and it just
+      // burns CPU/RAM while the user is signing in.
+      if (!this.isLoginOnly) {
+        this.frameRecorder = this.startFrameRecorder(this.page, this.meetingId);
+      }
 
       // Construct direct Zoom Web Client join URL or Registration URL
       const cleanMeetingId = String(this.meetingId).replace(/[\s]/g, '');
@@ -441,6 +452,37 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
       });
 
       await new Promise((res) => setTimeout(res, 3000));
+
+      // ── Login-only session: just dismiss cookie/consent banners a couple of
+      // times and hand control to the human via the Live Screen. Never run the
+      // meeting-join loop below — there is no meeting to join, and that loop
+      // would otherwise occupy this adapter (and block real meetings from
+      // taking over the live screen) for up to 10 minutes per attempt.
+      if (this.isLoginOnly) {
+        for (let i = 0; i < 4 && this.page; i++) {
+          await this.page
+            .evaluate(() => {
+              const dismissables = Array.from(
+                document.querySelectorAll('button, a, div[role="button"], span'),
+              ).filter((el) => {
+                const txt = ((el as HTMLElement).innerText || '').trim().toLowerCase();
+                return ['got it', 'ok', 'dismiss', 'close', 'i agree', 'allow', 'accept all cookies', 'continue'].includes(
+                  txt,
+                );
+              });
+              dismissables.forEach((el) => {
+                try {
+                  (el as HTMLElement).click();
+                } catch {}
+              });
+            })
+            .catch(() => {});
+          await new Promise((res) => setTimeout(res, 2000));
+        }
+        this.isConnected = true;
+        log.info({ meetingId: this.meetingId }, '✅ Zoom sign-in browser ready — waiting for human login via Live Screen');
+        return;
+      }
 
       // Robust in-page automation loop to fill React-controlled inputs, dismiss modals, and click Join
       const fillAndJoinMeeting = async (): Promise<boolean> => {
