@@ -53,4 +53,14 @@ export const recordingRepo = {
       },
     });
   },
+
+  async delete(id: string): Promise<MeetingRecording> {
+    return getDb().meetingRecording.delete({
+      where: { id },
+    });
+  },
+
+  async deleteAll(): Promise<{ count: number }> {
+    return getDb().meetingRecording.deleteMany({});
+  },
 };

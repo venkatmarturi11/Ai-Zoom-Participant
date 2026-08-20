@@ -8,9 +8,6 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
   /**
    * Verify admin API key for programmer-only endpoints.
    */
-  /**
-   * Verify admin API key for programmer-only endpoints.
-   */
   function verifyAdminKey(request: any, reply?: any): boolean {
     const adminKey = process.env['ADMIN_API_KEY']?.trim();
     if (!adminKey) return true; // No key configured — allow all (dev mode)
@@ -75,8 +72,19 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
    */
   fastify.post('/api/live/launch-login', async (request, reply) => {
     if (!verifyAdminKey(request, reply)) return;
-    await meetingService.launchLoginSession();
-    return reply.send({ success: true, message: 'Zoom sign-in browser launched on live screen' });
+    const body = (request.body || {}) as { url?: string };
+    const targetUrl = body.url || 'https://zoom.us/signin#/login';
+    await meetingService.launchLoginSession(targetUrl);
+    return reply.send({ success: true, url: targetUrl, message: 'Zoom sign-in browser launched on live screen' });
+  });
+
+  /**
+   * POST /api/live/close-login — Gracefully finish login session and persist session cookies
+   */
+  fastify.post('/api/live/close-login', async (request, reply) => {
+    if (!verifyAdminKey(request, reply)) return;
+    await meetingService.closeLoginSession();
+    return reply.send({ success: true, message: 'Login session finalized and cookies saved' });
   });
 
   /**
@@ -84,7 +92,7 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
    */
   fastify.get('/api/recordings', async (request, reply) => {
     if (!verifyAdminKey(request, reply)) return;
-    const list = await recordingRepo.listRecent(20);
+    const list = await recordingRepo.listRecent(50);
     return reply.send(list);
   });
 
@@ -104,6 +112,35 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
     reply.header('Content-Disposition', `inline; filename="${rec.fileName}"`);
     reply.header('Content-Length', rec.fileSize);
     return reply.send(rec.videoData);
+  });
+
+  /**
+   * DELETE /api/recordings/:id — Directly delete a recording from PostgreSQL database
+   */
+  fastify.delete('/api/recordings/:id', async (request, reply) => {
+    if (!verifyAdminKey(request, reply)) return;
+
+    const { id } = request.params as { id: string };
+    try {
+      await recordingRepo.delete(id);
+      return reply.send({ success: true, message: 'Recording successfully deleted from database' });
+    } catch (err: any) {
+      return reply.status(404).send({ error: 'NotFound', message: 'Recording not found or already deleted' });
+    }
+  });
+
+  /**
+   * DELETE /api/recordings/all — Delete all recordings from PostgreSQL database
+   */
+  fastify.delete('/api/recordings/all', async (request, reply) => {
+    if (!verifyAdminKey(request, reply)) return;
+
+    try {
+      const result = await recordingRepo.deleteAll();
+      return reply.send({ success: true, count: result.count, message: `${result.count} recordings deleted` });
+    } catch (err: any) {
+      return reply.status(500).send({ error: 'DeleteFailed', message: err?.message || 'Failed to delete recordings' });
+    }
   });
 
   /**
@@ -232,6 +269,8 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
       border: 1px solid var(--border);
       border-radius: 14px;
       backdrop-filter: blur(12px);
+      flex-wrap: wrap;
+      gap: 12px;
     }
     .header-left { display: flex; align-items: center; gap: 12px; }
     .logo {
@@ -250,8 +289,10 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
       font-size: 12px; font-weight: 600;
     }
     .pill-green { background: rgba(16,185,129,0.15); color: #34d399; border: 1px solid rgba(16,185,129,0.3); }
+    .pill-yellow { background: rgba(245,158,11,0.15); color: #fbbf24; border: 1px solid rgba(245,158,11,0.3); }
     .dot { width: 8px; height: 8px; border-radius: 50%; animation: pulse 1.5s infinite; }
     .dot-green { background: var(--green); box-shadow: 0 0 8px var(--green); }
+    .dot-yellow { background: var(--yellow); box-shadow: 0 0 8px var(--yellow); }
     @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.4;transform:scale(0.85)} }
 
     .grid {
@@ -278,6 +319,8 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
       border-bottom: 1px solid var(--border);
       display: flex; justify-content: space-between; align-items: center;
       background: rgba(0, 0, 0, 0.2);
+      flex-wrap: wrap;
+      gap: 8px;
     }
     .card-title {
       font-size: 13px; font-weight: 600;
@@ -303,6 +346,7 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
       display: flex; align-items: center; justify-content: center;
       overflow: hidden;
       user-select: none;
+      touch-action: none;
     }
     .screen-image {
       width: 100%; height: 100%; object-fit: contain; display: block;
@@ -320,70 +364,90 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
     }
     @keyframes clickRipple {
       0% { transform: translate(-50%, -50%) scale(0.4); opacity: 1; }
-      100% { transform: translate(-50%, -50%) scale(2.2); opacity: 0; }
+      100% { transform: translate(-50%, -50%) scale(1.6); opacity: 0; }
     }
 
     .screen-overlay {
-      position: absolute; bottom: 8px; left: 8px;
-      background: rgba(0, 0, 0, 0.8);
-      backdrop-filter: blur(10px);
-      padding: 4px 10px; border-radius: 6px;
-      font-size: 10px; font-family: var(--mono);
-      color: #93c5fd;
-      display: flex; gap: 10px;
-      border: 1px solid rgba(255, 255, 255, 0.1);
+      position: absolute; bottom: 8px; left: 12px; right: 12px;
+      display: flex; justify-content: space-between;
+      font-size: 11px; font-family: var(--mono); color: #e2e8f0;
+      text-shadow: 0 1px 4px rgba(0,0,0,0.9);
       pointer-events: none;
     }
 
-    /* Interactive Control Toolbar */
     .control-toolbar {
       padding: 12px 16px;
-      background: rgba(0, 0, 0, 0.3);
+      background: rgba(0, 0, 0, 0.35);
       border-top: 1px solid var(--border);
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
+      display: flex; flex-direction: column; gap: 10px;
     }
     .input-bar {
-      display: flex; gap: 8px;
+      display: flex; gap: 8px; width: 100%;
     }
     .text-input {
-      flex: 1;
-      padding: 8px 12px;
-      background: rgba(255, 255, 255, 0.05);
+      flex: 1; background: rgba(0, 0, 0, 0.4);
       border: 1px solid var(--border);
       border-radius: 8px;
-      color: #fff;
-      font-family: var(--mono);
-      font-size: 13px;
-      outline: none;
-      transition: border 0.2s;
+      padding: 8px 12px;
+      color: #fff; font-size: 13px;
+      outline: none; transition: border-color 0.2s;
     }
-    .text-input:focus {
-      border-color: var(--blue);
-      box-shadow: 0 0 10px rgba(59, 130, 246, 0.3);
-    }
+    .text-input:focus { border-color: var(--blue); }
     .btn-keys {
-      display: flex; gap: 6px; flex-wrap: wrap;
+      display: flex; flex-wrap: wrap; gap: 6px;
     }
+    .btn-key {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: #cbd5e1; border-radius: 6px;
+      padding: 6px 10px; font-size: 11px; font-weight: 500;
+      cursor: pointer; transition: all 0.15s;
+    }
+    .btn-key:hover {
+      background: rgba(255, 255, 255, 0.14);
+      color: #fff; transform: translateY(-1px);
+    }
+    .btn-key:active { transform: translateY(0); }
 
     .btn {
-      padding: 6px 14px; border-radius: 8px; font-size: 12px; font-weight: 600;
-      cursor: pointer; border: none; transition: all 0.2s ease;
+      padding: 7px 14px; border-radius: 8px; font-size: 12px; font-weight: 600;
+      cursor: pointer; border: none; transition: all 0.2s;
       display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-      text-decoration: none; font-family: 'Inter', sans-serif;
+      text-decoration: none;
     }
-    .btn-primary { background: linear-gradient(135deg, #2563eb, #3b82f6); color: #fff; }
-    .btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
-    .btn-secondary { background: rgba(255, 255, 255, 0.06); color: var(--text); border: 1px solid var(--border); }
-    .btn-secondary:hover { background: rgba(255, 255, 255, 0.12); }
-    .btn-warning { background: linear-gradient(135deg, #d97706, #f59e0b); color: #000; font-weight: 700; }
-    .btn-success { background: linear-gradient(135deg, #059669, #10b981); color: #fff; }
-    .btn-key {
-      padding: 5px 10px; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.15);
-      border-radius: 6px; font-size: 11px; font-family: var(--mono); color: #cbd5e1; cursor: pointer;
+    .btn-primary {
+      background: linear-gradient(135deg, var(--blue), #2563eb);
+      color: white; box-shadow: 0 2px 10px rgba(59,130,246,0.3);
     }
-    .btn-key:hover { background: rgba(255, 255, 255, 0.18); color: #fff; }
+    .btn-primary:hover {
+      background: linear-gradient(135deg, #2563eb, #1d4ed8);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 14px rgba(59,130,246,0.4);
+    }
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.08);
+      color: #cbd5e1; border: 1px solid var(--border);
+    }
+    .btn-secondary:hover { background: rgba(255, 255, 255, 0.15); color: #fff; }
+    .btn-success {
+      background: linear-gradient(135deg, #10b981, #059669);
+      color: white;
+      box-shadow: 0 2px 10px rgba(16,185,129,0.3);
+    }
+    .btn-success:hover {
+      background: linear-gradient(135deg, #059669, #047857);
+      transform: translateY(-1px);
+    }
+    .btn-danger {
+      background: linear-gradient(135deg, #ef4444, #dc2626);
+      color: white;
+      box-shadow: 0 2px 8px rgba(239,68,68,0.25);
+    }
+    .btn-danger:hover {
+      background: linear-gradient(135deg, #dc2626, #b91c1c);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(239,68,68,0.35);
+    }
 
     .sidebar {
       display: flex; flex-direction: column; gap: 14px;
@@ -391,13 +455,14 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
     .panel {
       background: var(--card);
       border: 1px solid var(--border);
-      border-radius: 16px;
+      border-radius: 14px;
       padding: 14px;
-      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+      display: flex; flex-direction: column; gap: 10px;
     }
     .panel h2 {
-      font-size: 13px; font-weight: 700; margin-bottom: 10px;
-      display: flex; align-items: center; gap: 8px;
+      font-size: 12px; font-weight: 700; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.05em;
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
     }
     .stat-row {
       display: flex; justify-content: space-between; align-items: center;
@@ -427,6 +492,14 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
       border-radius: 10px; padding: 10px; font-size: 11px; line-height: 1.45; color: #cbd5e1;
     }
     .help-box strong { color: #93c5fd; display: block; margin-bottom: 3px; }
+
+    @media (max-width: 640px) {
+      body { padding: 8px; }
+      .header { padding: 10px 12px; }
+      .header-right { width: 100%; justify-content: flex-start; }
+      .btn { font-size: 11px; padding: 6px 10px; }
+      .btn-key { font-size: 10px; padding: 5px 8px; }
+    }
   </style>
 </head>
 <body>
@@ -436,13 +509,13 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
         <div class="logo">🎮</div>
         <div>
           <h1>Zoom Bot Remote Control</h1>
-          <p>Click, Type &amp; Manage Browser in Real Time</p>
+          <p>Click, Type &amp; Manage Browser in Real Time (PC &amp; Mobile)</p>
         </div>
       </div>
       <div class="header-right">
         <div class="pill pill-green" id="headerPill">
-          <div class="dot dot-green"></div>
-          <span id="headerStatusText">Control Active</span>
+          <div class="dot dot-green" id="headerDot"></div>
+          <span id="headerStatusText">Control Ready</span>
         </div>
         <button class="btn btn-primary" onclick="launchLoginSession()">🔐 Launch Zoom Sign-In</button>
         <button class="btn btn-secondary" onclick="forceCapture()">📸 Capture</button>
@@ -458,8 +531,9 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
             <span class="live-tag">LIVE</span>
             <span class="rec-tag" id="recBadge" style="display:none">● REC</span>
           </div>
-          <div style="display: flex; gap: 8px; align-items: center;">
-            <button class="btn btn-secondary" id="pauseBtn" onclick="togglePause()">⏸ Pause</button>
+          <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+            <button class="btn btn-success" id="finishLoginBtn" style="display:none; font-size: 11px; padding: 5px 10px;" onclick="finishLoginSession()">✅ Finish Sign-In</button>
+            <button class="btn btn-secondary" id="pauseBtn" style="font-size: 11px; padding: 5px 10px;" onclick="togglePause()">⏸ Pause</button>
           </div>
         </div>
 
@@ -475,7 +549,7 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
         <!-- Interactive Remote Keyboard & Mouse Toolbar -->
         <div class="control-toolbar">
           <div class="input-bar">
-            <input type="text" id="typeTextInput" class="text-input" placeholder="Type text here & press Enter or Send (Email, Password, OTP)..." onkeydown="if(event.key==='Enter') sendTypedText()">
+            <input type="text" id="typeTextInput" class="text-input" placeholder="Type text here & press Enter or Send (Email, Password, Code)..." onkeydown="if(event.key==='Enter') sendTypedText()">
             <button class="btn btn-primary" onclick="sendTypedText()">⌨️ Send Text</button>
           </div>
 
@@ -486,7 +560,9 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
             <button class="btn-key" onclick="sendKey('Space')">Space</button>
             <button class="btn-key" onclick="sendScroll(350)">⬇️ Scroll Down</button>
             <button class="btn-key" onclick="sendScroll(-350)">⬆️ Scroll Up</button>
-            <button class="btn-key" onclick="navigateToUrl('https://zoom.us/signin')">🔐 Go to Zoom Login</button>
+            <button class="btn-key" onclick="navigateToUrl('https://zoom.us/signin#/login')">🔐 Zoom Login Page</button>
+            <button class="btn-key" onclick="navigateToUrl('https://zoom.us/google/oauth/signin')">🔵 Google Sign-In</button>
+            <button class="btn-key" onclick="navigateToUrl('https://zoom.us/saml/login')">🏢 SSO Sign-In</button>
           </div>
         </div>
       </div>
@@ -533,17 +609,20 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
         </div>
 
         <div class="help-box">
-          <strong>🖱️ How to Interact:</strong>
-          • <strong>Click anywhere on the screen</strong> to click buttons, inputs, or CAPTCHA checkmarks.<br>
-          • <strong>Type into the text bar</strong> and click "Send Text" to type email/passwords.<br>
-          • <strong>Click "Launch Zoom Sign-In"</strong> to sign in once permanently!
+          <strong>🖱️ How to Log In &amp; Use:</strong>
+          • <strong>Tap or Click anywhere on the screen</strong> to click buttons, input boxes, or CAPTCHA checkmarks on PC or Mobile.<br>
+          • <strong>Type into the text bar</strong> and click "Send Text" to enter your Zoom credentials.<br>
+          • <strong>Click "Launch Zoom Sign-In"</strong> to sign in once permanently — the bot saves your login session so future meetings join instantly without prompts!
         </div>
       </div>
     </div>
 
-    <!-- Saved Recordings -->
+    <!-- Saved Recordings with Direct Database Delete -->
     <div class="panel">
-      <h2>📼 Saved Database Recordings</h2>
+      <h2>
+        <span>📼 Saved Database Recordings</span>
+        <button class="btn btn-secondary" style="font-size: 10px; padding: 3px 8px;" onclick="loadRecordings()">🔄 Refresh</button>
+      </h2>
       <div id="recordingsList" style="display: grid; gap: 8px; margin-top: 8px;">
         <div style="color: var(--muted); font-size: 12px;">Loading database recordings...</div>
       </div>
@@ -563,6 +642,7 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
     let ws = null;
     let lastState = 'IDLE';
     let sessionStartTime = null;
+    let isLoginMode = false;
 
     function addLog(icon, text) {
       const time = new Date().toLocaleTimeString();
@@ -570,12 +650,10 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
       div.className = 'log-item';
       div.innerHTML = '<span class="log-time">' + time + '</span><span>' + icon + ' ' + text + '</span>';
       logList.prepend(div);
-      while (logList.children.length > 30) logList.removeChild(logList.lastChild);
+      while (logList.children.length > 35) logList.removeChild(logList.lastChild);
     }
 
     function initWebSocket() {
-      // Guard both CONNECTING (0) and OPEN (1) so rapid clicks/keys before the
-      // first connection finishes don't spawn duplicate sockets.
       if (ws && (ws.readyState === 0 || ws.readyState === 1)) return;
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       ws = new WebSocket(protocol + '//' + window.location.host + apiUrl('/api/live/control'));
@@ -600,35 +678,45 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
       if (ws && ws.readyState === 1) {
         ws.send(JSON.stringify(evt));
       } else {
-        // Still connecting (or reconnecting) — queue it instead of silently
-        // dropping the click/keystroke, and flush once the socket opens.
         pendingWs.push(evt);
         if (pendingWs.length > 20) pendingWs.shift();
       }
     }
 
-    // Direct Click on screen image
-    screenImg.addEventListener('click', (e) => {
-      e.preventDefault();
+    // Direct Click / Touch on screen image
+    function handlePointer(clientX, clientY) {
       const rect = screenImg.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
       const scaleX = 1280 / rect.width;
       const scaleY = 720 / rect.height;
-      const clickX = (e.clientX - rect.left) * scaleX;
-      const clickY = (e.clientY - rect.top) * scaleY;
+      const clickX = Math.max(0, Math.min(1280, (clientX - rect.left) * scaleX));
+      const clickY = Math.max(0, Math.min(720, (clientY - rect.top) * scaleY));
 
       // Show visual click indicator
       const ripple = document.createElement('div');
       ripple.className = 'click-indicator';
-      ripple.style.left = (e.clientX - screenContainer.getBoundingClientRect().left) + 'px';
-      ripple.style.top = (e.clientY - screenContainer.getBoundingClientRect().top) + 'px';
+      ripple.style.left = (clientX - screenContainer.getBoundingClientRect().left) + 'px';
+      ripple.style.top = (clientY - screenContainer.getBoundingClientRect().top) + 'px';
       screenContainer.appendChild(ripple);
       setTimeout(() => ripple.remove(), 700);
 
       sendWs({ type: 'click', x: clickX, y: clickY });
       addLog('🖱️', 'Clicked at (' + Math.round(clickX) + ', ' + Math.round(clickY) + ')');
 
-      // Request quick refresh
-      setTimeout(forceCapture, 400);
+      setTimeout(forceCapture, 350);
+    }
+
+    screenImg.addEventListener('click', (e) => {
+      e.preventDefault();
+      handlePointer(e.clientX, e.clientY);
+    });
+
+    screenImg.addEventListener('touchend', (e) => {
+      if (e.changedTouches && e.changedTouches.length > 0) {
+        e.preventDefault();
+        const touch = e.changedTouches[0];
+        handlePointer(touch.clientX, touch.clientY);
+      }
     });
 
     function sendTypedText() {
@@ -638,34 +726,53 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
       sendWs({ type: 'type', text: text });
       addLog('⌨️', 'Typed text: "' + text.replace(/./g, '*') + '"');
       input.value = '';
-      setTimeout(forceCapture, 500);
+      setTimeout(forceCapture, 400);
     }
 
     function sendKey(key) {
       sendWs({ type: 'press', key: key });
       addLog('⌨️', 'Pressed key: [' + key + ']');
-      setTimeout(forceCapture, 500);
+      setTimeout(forceCapture, 400);
     }
 
     function sendScroll(deltaY) {
       sendWs({ type: 'scroll', deltaY: deltaY });
       addLog('📜', 'Scrolled ' + (deltaY > 0 ? 'down' : 'up'));
-      setTimeout(forceCapture, 400);
+      setTimeout(forceCapture, 350);
     }
 
     function navigateToUrl(url) {
       sendWs({ type: 'goto', url: url });
-      addLog('🌐', 'Navigated to ' + url);
-      setTimeout(forceCapture, 1500);
+      addLog('🌐', 'Navigating to ' + url);
+      setTimeout(forceCapture, 1200);
     }
 
     async function launchLoginSession() {
       addLog('🚀', 'Launching interactive Zoom sign-in browser session...');
+      isLoginMode = true;
+      document.getElementById('finishLoginBtn').style.display = 'inline-flex';
       try {
-        await fetch(apiUrl('/api/live/launch-login'), { method: 'POST' });
-        setTimeout(forceCapture, 1500);
+        await fetch(apiUrl('/api/live/launch-login'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: 'https://zoom.us/signin#/login' })
+        });
+        setTimeout(forceCapture, 1200);
       } catch (err) {
         addLog('❌', 'Failed to launch login session');
+      }
+    }
+
+    async function finishLoginSession() {
+      addLog('💾', 'Finalizing Zoom login and saving permanent session cookies...');
+      try {
+        await fetch(apiUrl('/api/live/close-login'), { method: 'POST' });
+        isLoginMode = false;
+        document.getElementById('finishLoginBtn').style.display = 'none';
+        addLog('✅', 'Zoom login session saved permanently! Future meetings will join automatically.');
+        setTimeout(forceCapture, 1000);
+      } catch (err) {
+        addLog('❌', 'Failed to finalize login session');
       }
     }
 
@@ -731,6 +838,10 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
           document.getElementById('recorderStatusVal').style.color = '#34d399';
           recBadge.style.display = 'inline-flex';
 
+          if (d.displayName === 'User Login' || isLoginMode) {
+            document.getElementById('finishLoginBtn').style.display = 'inline-flex';
+          }
+
           if (d.status === 'CONNECTED') {
             statusVal.textContent = 'CONNECTED';
             statusVal.style.color = '#34d399';
@@ -757,9 +868,28 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
           document.getElementById('recorderStatusVal').textContent = 'Ready';
           document.getElementById('recorderStatusVal').style.color = '#94a3b8';
           recBadge.style.display = 'none';
+          document.getElementById('finishLoginBtn').style.display = 'none';
+          isLoginMode = false;
           lastState = 'IDLE';
         }
       } catch {}
+    }
+
+    async function deleteRecording(id, zoomMeetingId) {
+      if (!confirm('Are you sure you want to permanently delete the recording for Zoom Meeting ' + zoomMeetingId + ' from the database?')) {
+        return;
+      }
+      try {
+        const res = await fetch(apiUrl('/api/recordings/' + id), { method: 'DELETE' });
+        if (res.ok) {
+          addLog('🗑️', 'Deleted recording for meeting ' + zoomMeetingId + ' from database');
+          loadRecordings();
+        } else {
+          alert('Failed to delete recording from database.');
+        }
+      } catch (err) {
+        alert('Network error while deleting recording.');
+      }
     }
 
     async function loadRecordings() {
@@ -770,23 +900,23 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
         if (res.ok) {
           const items = await res.json();
           if (items.length === 0) {
-            container.innerHTML = '<div style="color: var(--muted); font-size: 12px;">No recordings stored yet. Join and stop a meeting to view recordings here.</div>';
+            container.innerHTML = '<div style="color: var(--muted); font-size: 12px; padding: 8px 0;">No recordings stored yet. Join and stop a meeting to view recordings here.</div>';
             return;
           }
           container.innerHTML = items.map(function(item) {
             var sizeMb = (item.fileSize / (1024 * 1024)).toFixed(2);
             var recDate = new Date(item.createdAt).toLocaleString();
-            return '<div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border); border-radius: 10px;">' +
+            return '<div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border); border-radius: 10px; flex-wrap: wrap; gap: 8px;">' +
               '<div>' +
                 '<div style="font-weight: 600; font-size: 13px; color: #fff;">Zoom Meeting: <code>' + item.zoomMeetingId + '</code></div>' +
                 '<div style="font-size: 11px; color: var(--muted); margin-top: 2px;">Size: ' + sizeMb + ' MB • ' + recDate + '</div>' +
               '</div>' +
-              '<a href="/api/recordings/' + item.id + '/download" target="_blank" class="btn btn-primary" style="font-size: 11px; padding: 5px 10px;">▶️ Download MP4</a>' +
+              '<div style="display: flex; gap: 8px; align-items: center;">' +
+                '<a href="' + apiUrl('/api/recordings/' + item.id + '/download') + '" target="_blank" class="btn btn-primary" style="font-size: 11px; padding: 5px 10px;">▶️ Download MP4</a>' +
+                '<button onclick="deleteRecording(\\'' + item.id + '\\', \\'' + item.zoomMeetingId + '\\')" class="btn btn-danger" style="font-size: 11px; padding: 5px 10px;">🗑️ Delete</button>' +
+              '</div>' +
             '</div>';
           }).join('');
-          container.querySelectorAll('a[href^="/api/recordings/"]').forEach(function(link) {
-            link.setAttribute('href', apiUrl(link.getAttribute('href')));
-          });
         } else if (res.status === 403) {
           container.innerHTML = '<div style="color: var(--muted); font-size: 12px;">🔒 Recordings require programmer API key (ADMIN_API_KEY).</div>';
         }
@@ -796,8 +926,8 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     initWebSocket();
-    setInterval(refreshScreen, 1500);
-    setInterval(pollStatus, 2000);
+    setInterval(refreshScreen, 1200);
+    setInterval(pollStatus, 1500);
     setInterval(loadRecordings, 12000);
 
     pollStatus();

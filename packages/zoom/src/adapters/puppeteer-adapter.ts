@@ -459,6 +459,20 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
       // would otherwise occupy this adapter (and block real meetings from
       // taking over the live screen) for up to 10 minutes per attempt.
       if (this.isLoginOnly) {
+        // Active interval for live dashboard screenshots during login session (every 1.2s)
+        const loginInterval = setInterval(async () => {
+          if (!this.page || this.isEnded) {
+            clearInterval(loginInterval);
+            return;
+          }
+          try {
+            const buf = await this.page.screenshot({ type: 'jpeg', quality: 55 });
+            if (buf && buf.length > 0) {
+              this.latestScreenshot = buf as Buffer;
+            }
+          } catch {}
+        }, 1200);
+
         for (let i = 0; i < 4 && this.page; i++) {
           await this.page
             .evaluate(() => {
@@ -477,7 +491,7 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
               });
             })
             .catch(() => {});
-          await new Promise((res) => setTimeout(res, 2000));
+          await new Promise((res) => setTimeout(res, 1500));
         }
         this.isConnected = true;
         log.info({ meetingId: this.meetingId }, '✅ Zoom sign-in browser ready — waiting for human login via Live Screen');

@@ -452,13 +452,21 @@ export class MeetingService {
 
   /**
    * Launch an interactive browser session to Zoom Sign-in page for manual permanent login.
-   * No-ops if a real meeting is already active (the meeting owns the Live Screen)
-   * or a login session is already running.
+   * If already running, navigates directly to the requested login URL.
    */
-  public async launchLoginSession(): Promise<void> {
-    if (activeBrowserAdapters.size > 0 || loginAdapter) return;
+  public async launchLoginSession(customUrl?: string): Promise<void> {
+    const targetUrl = customUrl || 'https://zoom.us/signin#/login';
 
-    const adapter = new PuppeteerZoomAdapter('web-user', 'https://zoom.us/signin', undefined, 'User Login', true);
+    if (loginAdapter) {
+      if (typeof loginAdapter.handleControlEvent === 'function') {
+        await loginAdapter.handleControlEvent({ type: 'goto', url: targetUrl });
+      }
+      return;
+    }
+
+    if (activeBrowserAdapters.size > 0) return;
+
+    const adapter = new PuppeteerZoomAdapter('web-user', targetUrl, undefined, 'User Login', true);
     loginAdapter = adapter;
     loginAdapterExpiry = setTimeout(() => {
       stopLoginAdapter().catch(() => {});
@@ -470,6 +478,13 @@ export class MeetingService {
         stopLoginAdapter().catch(() => {});
       }
     });
+  }
+
+  /**
+   * Gracefully close login session and save all cookies to disk.
+   */
+  public async closeLoginSession(): Promise<void> {
+    await stopLoginAdapter();
   }
 }
 
