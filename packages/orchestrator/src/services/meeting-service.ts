@@ -455,7 +455,7 @@ export class MeetingService {
    * If already running, navigates directly to the requested login URL.
    */
   public async launchLoginSession(customUrl?: string): Promise<void> {
-    const targetUrl = customUrl || 'https://zoom.us/signin#/login';
+    const targetUrl = customUrl || 'https://zoom.us/signin';
 
     if (loginAdapter) {
       if (typeof loginAdapter.handleControlEvent === 'function') {

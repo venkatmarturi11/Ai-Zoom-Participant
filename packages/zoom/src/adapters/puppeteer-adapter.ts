@@ -473,26 +473,26 @@ export class PuppeteerZoomAdapter implements MeetingAdapter {
           } catch {}
         }, 1200);
 
-        for (let i = 0; i < 4 && this.page; i++) {
-          await this.page
-            .evaluate(() => {
-              const dismissables = Array.from(
-                document.querySelectorAll('button, a, div[role="button"], span'),
-              ).filter((el) => {
-                const txt = ((el as HTMLElement).innerText || '').trim().toLowerCase();
-                return ['got it', 'ok', 'dismiss', 'close', 'i agree', 'allow', 'accept all cookies', 'continue'].includes(
-                  txt,
-                );
-              });
-              dismissables.forEach((el) => {
-                try {
-                  (el as HTMLElement).click();
-                } catch {}
-              });
-            })
-            .catch(() => {});
-          await new Promise((res) => setTimeout(res, 1500));
-        }
+        // Only dismiss cookie consent banners (e.g. OneTrust / TrustArc), NEVER submit forms or click "Continue"
+        await this.page
+          .evaluate(() => {
+            const cookieBtns = document.querySelectorAll(
+              '#onetrust-accept-btn-handler, #truste-consent-button, .cookie-banner-accept, button[id*="cookie" i], button[id*="consent" i]',
+            );
+            cookieBtns.forEach((el) => {
+              try {
+                (el as HTMLElement).click();
+              } catch {}
+            });
+          })
+          .catch(() => {});
+
+        // Capture first frame immediately
+        try {
+          const buf = await this.page.screenshot({ type: 'jpeg', quality: 55 });
+          if (buf && buf.length > 0) this.latestScreenshot = buf as Buffer;
+        } catch {}
+
         this.isConnected = true;
         log.info({ meetingId: this.meetingId }, '✅ Zoom sign-in browser ready — waiting for human login via Live Screen');
         return;

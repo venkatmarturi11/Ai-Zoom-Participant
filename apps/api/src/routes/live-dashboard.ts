@@ -73,7 +73,7 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.post('/api/live/launch-login', async (request, reply) => {
     if (!verifyAdminKey(request, reply)) return;
     const body = (request.body || {}) as { url?: string };
-    const targetUrl = body.url || 'https://zoom.us/signin#/login';
+    const targetUrl = body.url || 'https://zoom.us/signin';
     await meetingService.launchLoginSession(targetUrl);
     return reply.send({ success: true, url: targetUrl, message: 'Zoom sign-in browser launched on live screen' });
   });
@@ -560,7 +560,7 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
             <button class="btn-key" onclick="sendKey('Space')">Space</button>
             <button class="btn-key" onclick="sendScroll(350)">⬇️ Scroll Down</button>
             <button class="btn-key" onclick="sendScroll(-350)">⬆️ Scroll Up</button>
-            <button class="btn-key" onclick="navigateToUrl('https://zoom.us/signin#/login')">🔐 Zoom Login Page</button>
+            <button class="btn-key" onclick="navigateToUrl('https://zoom.us/signin')">🔐 Zoom Login Page</button>
             <button class="btn-key" onclick="navigateToUrl('https://zoom.us/google/oauth/signin')">🔵 Google Sign-In</button>
             <button class="btn-key" onclick="navigateToUrl('https://zoom.us/saml/login')">🏢 SSO Sign-In</button>
           </div>
@@ -755,7 +755,7 @@ export const liveDashboardRoutes: FastifyPluginAsync = async (fastify) => {
         await fetch(apiUrl('/api/live/launch-login'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: 'https://zoom.us/signin#/login' })
+          body: JSON.stringify({ url: 'https://zoom.us/signin' })
         });
         setTimeout(forceCapture, 1200);
       } catch (err) {
